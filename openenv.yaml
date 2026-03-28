@@ -1,0 +1,9 @@
+name: incident-response-env
+version: "1.0.0"
+description: "Simulates production incident response for SRE/DevOps agents. Agents must triage alerts, investigate logs and metrics, diagnose root causes, and apply remediations across 3 difficulty levels."
+tags:
+  - openenv
+  - incident-response
+  - sre
+  - devops
+  - real-world
