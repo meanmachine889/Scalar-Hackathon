@@ -30,6 +30,11 @@ class Scenario:
     relevant_services: list[str]
     # Services that are red herrings
     red_herring_services: list[str] = field(default_factory=list)
+    # Multi-category root causes (for harder tasks requiring identification of
+    # multiple distinct root cause aspects). If non-empty, resolve must match
+    # keywords from at least min_root_cause_categories different categories.
+    root_cause_categories: dict[str, list[str]] = field(default_factory=dict)
+    min_root_cause_categories: int = 1
 
 
 def _easy_scenario() -> Scenario:
@@ -83,6 +88,12 @@ def _easy_scenario() -> Scenario:
                 LogEntry(timestamp="2024-01-15T14:21:00Z", level="INFO", service="database",
                          message="Long-running query detected: analytics join running for 45s (pid 3847)"),
             ],
+            "notification-service": [
+                LogEntry(timestamp="2024-01-15T14:23:00Z", level="WARN", service="notification-service",
+                         message="Email delivery queue backing up — 340 pending notifications"),
+                LogEntry(timestamp="2024-01-15T14:23:05Z", level="INFO", service="notification-service",
+                         message="Retrying failed email batch: 23 emails to re-queue (SMTP timeout)"),
+            ],
         },
         service_metrics={
             "api-gateway": [
@@ -97,6 +108,10 @@ def _easy_scenario() -> Scenario:
                 MetricPoint(name="query_queue_length", value=127.0, unit="count", timestamp="2024-01-15T14:23:00Z"),
                 MetricPoint(name="cpu_usage", value=89.0, unit="percent", timestamp="2024-01-15T14:23:00Z"),
                 MetricPoint(name="disk_io_util", value=72.0, unit="percent", timestamp="2024-01-15T14:23:00Z"),
+            ],
+            "notification-service": [
+                MetricPoint(name="email_queue_depth", value=340.0, unit="count", timestamp="2024-01-15T14:23:00Z"),
+                MetricPoint(name="delivery_success_rate", value=78.0, unit="percent", timestamp="2024-01-15T14:23:00Z"),
             ],
         },
         available_commands={
@@ -126,6 +141,7 @@ def _easy_scenario() -> Scenario:
         ],
         correct_escalation_teams=["database", "backend", "platform"],
         relevant_services=["api-gateway", "database"],
+        red_herring_services=["notification-service"],
     )
 
 
@@ -444,6 +460,21 @@ def _hard_scenario() -> Scenario:
         correct_escalation_teams=["payments", "database", "infrastructure", "finance"],
         relevant_services=["payment-processor", "payment-db", "message-queue"],
         red_herring_services=["analytics-cluster", "cdn-edge"],
+        root_cause_categories={
+            "deploy_schema": [
+                "schema migration", "deploy v3.8.0", "version 3.8.0",
+                "bad deploy", "schema divergence", "schema mismatch",
+            ],
+            "replication_disk": [
+                "replication", "replica-2", "disk space", "disk full",
+                "replication lag", "replication conflict",
+            ],
+            "idempotency": [
+                "idempotency", "idempotency_key", "duplicate charge",
+                "duplicate charges", "retry", "race condition",
+            ],
+        },
+        min_root_cause_categories=2,
     )
 
 

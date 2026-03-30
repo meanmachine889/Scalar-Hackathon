@@ -35,7 +35,7 @@ Each observation includes:
 ### Easy: Database Connection Pool Exhaustion
 **Max steps**: 15 | **Expected score**: 0.7–0.9
 
-Single service (`api-gateway`) returning HTTP 500s. Logs clearly show connection pool exhaustion caused by a slow analytics query introduced in a recent deploy. Fix by rolling back, killing the query, or restarting.
+Single service (`api-gateway`) returning HTTP 500s. Logs clearly show connection pool exhaustion caused by a slow analytics query introduced in a recent deploy. Fix by rolling back, killing the query, or restarting. Includes a red herring notification service to test triage skills.
 
 ### Medium: Cascading Cache Failure
 **Max steps**: 20 | **Expected score**: 0.5–0.7
@@ -45,7 +45,7 @@ Multiple services degraded. Root cause is a Redis cache node that OOM'd and fail
 ### Hard: Payment Pipeline Corruption
 **Max steps**: 25 | **Expected score**: 0.3–0.5
 
-P1 incident with duplicate charges and missing transactions. Multiple root causes: a schema migration that didn't propagate to a database replica (disk full), plus the application retrying on inconsistent state. Red herring alerts from analytics and CDN. Must identify ALL root causes and coordinate multi-step remediation.
+P1 incident with duplicate charges and missing transactions. **Multiple root causes** across 3 categories: (1) schema migration that didn't propagate to a database replica, (2) disk full on replica-2 stalling replication, (3) idempotency check failures causing duplicate charges. Red herring alerts from analytics and CDN. Agent must identify root causes from **at least 2 of 3 categories** for full diagnosis credit.
 
 ## Reward Design
 
@@ -83,10 +83,17 @@ The graders use **deterministic keyword matching** on the `root_cause` and `reme
 - **Root cause validation**: Agent's root cause string is checked for case-insensitive substring matches against predefined keywords
   - Example (easy task): agent responds "connection pool exhausted due to slow query" → matches keyword "pool exhaustion" ✅
   - **Result**: Sets `root_cause_identified` flag and awards +0.20 reward
+  - **Hard task**: Uses **multi-category matching** — root causes are grouped into 3 categories (deploy/schema, replication/disk, idempotency). Agent must match keywords from at least 2 categories for full credit. Matching only 1 category gives partial credit (+0.08 instead of +0.20).
 
 - **Remediation validation**: Agent's remediation string is checked for case-insensitive substring matches against valid remediation keywords
   - Example (easy task): agent responds "restart api-gateway to reset connections" → matches keyword "restart" ✅
   - **Result**: Sets `remediation_applied` flag and awards +0.15 reward
+
+### Anti-Gaming Measures
+
+- **Length limit**: `root_cause` and `remediation` must each be under 500 characters. Excessively long text (keyword stuffing) is penalized and rejected.
+- **Investigation prerequisite**: Agent must have checked alerts AND investigated at least one relevant service before `resolve` can succeed. Premature resolve attempts are penalized.
+- **Resolve spam penalty**: More than 3 failed resolve attempts incur increasing penalties.
 
 This approach ensures **reproducibility** and **fairness** across all evaluations. Root cause/remediation keywords are defined per-task in `src/scenarios.py`.
 
@@ -160,10 +167,10 @@ curl http://localhost:8000/tasks
 |------|-------|-------|-------|
 | easy_db_pool | expert | **0.8900** | **9** |
 | medium_cache_cascade | expert | **0.8975** | **11** |
-| hard_payment_corruption | expert | **0.8035** | **19** |
-| **Average** | **expert** | **0.8637** | — |
+| hard_payment_corruption | expert | **0.8660** | **19** |
+| **Average** | **expert** | **0.8845** | — |
 
-The expert baseline demonstrates strong performance across all difficulty levels. Run `python baseline.py --expert` to reproduce these scores locally.
+The expert baseline demonstrates strong performance across all difficulty levels. Run `python baseline.py --expert` or `python inference.py --expert` to reproduce these scores locally.
 
 ## Hugging Face Space
 
