@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from src.environment import IncidentResponseEnv
 from src.graders import grade_task
 from src.models import Action, Observation, State
+
+# ── Logging (for HF visibility) ───────────────────────────────────────────────
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+logger.info("=== SERVER FILE LOADED ===")
 
 app = FastAPI(
     title="Incident Response Environment",
@@ -19,6 +25,11 @@ app = FastAPI(
 )
 
 env = IncidentResponseEnv()
+
+
+@app.on_event("startup")
+def startup_event():
+    logger.info("=== APP STARTUP COMPLETE ===")
 
 
 class ResetRequest(BaseModel):
@@ -35,21 +46,19 @@ class GradeResponse(BaseModel):
 
 
 # ── Root (CRITICAL for HF) ─────────────────────────────────────────────────────
-
 @app.get("/")
 def root():
+    logger.info("=== ROOT ENDPOINT HIT ===")
     return {"status": "running"}
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
-
 @app.get("/health")
 def health():
     return {"status": "healthy"}
 
 
 # ── OpenEnv API ───────────────────────────────────────────────────────────────
-
 @app.post("/reset", response_model=Observation)
 def reset(request: ResetRequest):
     try:
@@ -76,7 +85,6 @@ def grade():
 
 
 # ── Info ──────────────────────────────────────────────────────────────────────
-
 @app.get("/tasks")
 def list_tasks():
     return {
