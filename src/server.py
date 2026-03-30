@@ -34,8 +34,14 @@ class GradeResponse(BaseModel):
     state: State
 
 
-# ── Health ────────────────────────────────────────────────────────────────────
+# ── Root (CRITICAL for HF) ─────────────────────────────────────────────────────
 
+@app.get("/")
+def root():
+    return {"status": "running"}
+
+
+# ── Health ────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
 def health():
@@ -44,10 +50,8 @@ def health():
 
 # ── OpenEnv API ───────────────────────────────────────────────────────────────
 
-
 @app.post("/reset", response_model=Observation)
 def reset(request: ResetRequest):
-    """Reset the environment and start a new episode."""
     try:
         return env.reset(task_id=request.task_id)
     except ValueError as e:
@@ -56,19 +60,16 @@ def reset(request: ResetRequest):
 
 @app.post("/step", response_model=Observation)
 def step(request: StepRequest):
-    """Execute an action and return the observation."""
     return env.step(request.action)
 
 
 @app.get("/state", response_model=State)
 def state():
-    """Get the current episode state."""
     return env.state()
 
 
 @app.post("/grade", response_model=GradeResponse)
 def grade():
-    """Grade the current episode. Call after the episode is done."""
     current_state = env.state()
     score = grade_task(current_state)
     return GradeResponse(score=score, state=current_state)
@@ -76,10 +77,8 @@ def grade():
 
 # ── Info ──────────────────────────────────────────────────────────────────────
 
-
 @app.get("/tasks")
 def list_tasks():
-    """List available tasks."""
     return {
         "tasks": [
             {
@@ -105,7 +104,3 @@ def list_tasks():
             },
         ]
     }
-
-@app.get("/")
-def root():
-    return {"message": "Incident Response Env is running"}
