@@ -76,6 +76,20 @@ Rewards provide **continuous signal** throughout the episode:
 | Communication | 10% | Sent status updates and escalated appropriately |
 | Efficiency | 15% | Fewer steps = higher score (only if resolved) |
 
+### Root Cause & Remediation Validation
+
+The graders use **deterministic keyword matching** on the `root_cause` and `remediation` fields in the `resolve` action:
+
+- **Root cause validation**: Agent's root cause string is checked for case-insensitive substring matches against predefined keywords
+  - Example (easy task): agent responds "connection pool exhausted due to slow query" → matches keyword "pool exhaustion" ✅
+  - **Result**: Sets `root_cause_identified` flag and awards +0.20 reward
+
+- **Remediation validation**: Agent's remediation string is checked for case-insensitive substring matches against valid remediation keywords
+  - Example (easy task): agent responds "restart api-gateway to reset connections" → matches keyword "restart" ✅
+  - **Result**: Sets `remediation_applied` flag and awards +0.15 reward
+
+This approach ensures **reproducibility** and **fairness** across all evaluations. Root cause/remediation keywords are defined per-task in `src/scenarios.py`.
+
 ## Setup & Usage
 
 ### Local Development
@@ -132,11 +146,24 @@ curl http://localhost:8000/tasks
 
 ## Baseline Scores
 
+### Published Baseline (gpt-4o-mini)
+
 | Task | Model | Grade | Steps |
 |------|-------|-------|-------|
 | easy_db_pool | gpt-4o-mini | ~0.72 | 8 |
 | medium_cache_cascade | gpt-4o-mini | ~0.55 | 14 |
 | hard_payment_corruption | gpt-4o-mini | ~0.35 | 20 |
+
+### Current Baseline (Expert Hardcoded Policy)
+
+| Task | Model | Grade | Steps |
+|------|-------|-------|-------|
+| easy_db_pool | expert | **0.8900** | **9** |
+| medium_cache_cascade | expert | **0.8975** | **11** |
+| hard_payment_corruption | expert | **0.8035** | **19** |
+| **Average** | **expert** | **0.8637** | — |
+
+The expert baseline demonstrates strong performance across all difficulty levels. Run `python baseline.py --expert` to reproduce these scores locally.
 
 ## Hugging Face Space
 
