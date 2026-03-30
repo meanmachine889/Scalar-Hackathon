@@ -287,6 +287,20 @@ def main():
     print("-" * 60)
     print(f"{'Average (' + mode_label + ')':<30} {avg_grade:>8.4f}")
 
+    # Save results to file for reproducibility and CI/CD integration
+    results_file = "results.json"
+    with open(results_file, "w") as f:
+        json.dump({
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "mode": "expert" if expert_mode else "llm",
+            "model": MODEL if not expert_mode else "N/A",
+            "environment": ENV_URL,
+            "tasks": results,
+            "average_grade": avg_grade,
+            "test_status": "PASSED" if avg_grade > 0.3 else "FAILED"
+        }, f, indent=2)
+    print(f"\nResults saved to {results_file}")
+
     return results
 
 

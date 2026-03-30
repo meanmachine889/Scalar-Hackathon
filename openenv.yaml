@@ -1,9 +1,175 @@
 name: incident-response-env
 version: "1.0.0"
-description: "Simulates production incident response for SRE/DevOps agents. Agents must triage alerts, investigate logs and metrics, diagnose root causes, and apply remediations across 3 difficulty levels."
+description: "OpenEnv-compliant environment simulating production incident response for SRE/DevOps AI agents. Agents must triage alerts, investigate service logs and metrics, diagnose root causes, and apply remediations — just like a real on-call engineer."
 tags:
   - openenv
   - incident-response
   - sre
   - devops
   - real-world
+  - observability
+
+entry_point: "src.server:app"
+
+action_space:
+  type: "discrete_union"
+  description: "Seven action types available to the agent during incident response"
+  actions:
+    - name: "check_alerts"
+      description: "View all active production alerts"
+      fields: {}
+    - name: "read_logs"
+      description: "Read log entries for a specific service"
+      required_fields:
+        - name: service
+          type: string
+          description: "Target service name (e.g., api-gateway, database, redis-cluster)"
+    - name: "check_metrics"
+      description: "Check metrics/dashboards (CPU, latency, error rate, connections, memory) for a service"
+      required_fields:
+        - name: service
+          type: string
+          description: "Target service name"
+    - name: "run_command"
+      description: "Execute a diagnostic or remediation command (restart, rollback, kill query, scale, etc.)"
+      required_fields:
+        - name: command
+          type: string
+          description: "Command to execute (e.g., 'restart api-gateway', 'rollback api-gateway 2.14.2')"
+    - name: "escalate"
+      description: "Page/escalate to a specific team for coordinated response"
+      required_fields:
+        - name: team
+          type: string
+          description: "Team to escalate to (e.g., database, infrastructure, payments)"
+    - name: "communicate"
+      description: "Post a status update to the incident channel for stakeholder awareness"
+      required_fields:
+        - name: message
+          type: string
+          description: "Status update message"
+    - name: "resolve"
+      description: "Attempt to close the incident with diagnosed root cause and applied remediation"
+      required_fields:
+        - name: root_cause
+          type: string
+          description: "Identified root cause of the incident"
+        - name: remediation
+          type: string
+          description: "Remediation action(s) taken to fix the issue"
+
+observation_space:
+  type: "object"
+  description: "Multi-modal observation provided after each action"
+  fields:
+    - name: message
+      type: string
+      description: "Human-readable description of what happened"
+    - name: alerts
+      type: array
+      description: "Active production alerts (id, severity, service, message, timestamp)"
+    - name: logs
+      type: array
+      description: "Log entries from services (timestamp, level, service, message)"
+    - name: metrics
+      type: array
+      description: "Metric data points (name, value, unit, timestamp)"
+    - name: command_output
+      type: string
+      description: "Output from executed commands"
+    - name: reward
+      type: float
+      description: "Immediate reward for this step"
+    - name: cumulative_reward
+      type: float
+      description: "Total reward accumulated in this episode"
+    - name: step_number
+      type: integer
+      description: "Current step count"
+    - name: max_steps
+      type: integer
+      description: "Maximum allowed steps for this task"
+    - name: done
+      type: boolean
+      description: "Whether the episode has ended (success, timeout, or unrecoverable state)"
+
+reward_scheme:
+  type: "continuous_sparse_to_dense"
+  description: "Rewards provide continuous signal throughout the episode, with larger bonuses for correct diagnosis and remediation"
+  reward_signals:
+    - name: "initial_alert_check"
+      value: 0.05
+      description: "First time checking alerts"
+    - name: "relevant_service_investigation"
+      value: 0.05-0.08
+      description: "Investigating a service relevant to the root cause (first time)"
+    - name: "red_herring_investigation"
+      value: 0.01 + (-0.02 penalty)
+      description: "Investigating a red herring service (low value, slight penalty)"
+    - name: "remediation_command"
+      value: 0.12
+      description: "Running a correct remediation command"
+    - name: "correct_escalation"
+      value: 0.06
+      description: "Escalating to the correct team"
+    - name: "communication"
+      value: 0.03 (up to 3 times)
+      description: "Sending status updates (communication counts decrease after 3)"
+    - name: "root_cause_diagnosis"
+      value: 0.20
+      description: "Correctly identifying root cause in resolve action"
+    - name: "remediation_application"
+      value: 0.15
+      description: "Correctly applying remediation in resolve action"
+    - name: "full_resolution_bonus"
+      value: 0.10
+      description: "Completing investigation, diagnosis, and remediation in single episode"
+    - name: "efficiency_bonus"
+      value: up to 0.10
+      description: "Bonus for using fewer steps (only if resolved)"
+    - name: "invalid_action_penalty"
+      value: -0.01 to -0.05
+      description: "Penalizes invalid/empty actions or missing required fields"
+    - name: "timeout_penalty"
+      value: -0.15
+      description: "Penalty when max_steps exceeded without resolution"
+
+tasks:
+  - task_id: "easy_db_pool"
+    name: "Database Connection Pool Exhaustion"
+    difficulty: "easy"
+    description: "Single service (api-gateway) returning HTTP 500s. Logs clearly show connection pool exhaustion caused by a slow analytics query introduced in a recent deploy. Fix by rolling back, killing the query, or restarting."
+    max_steps: 15
+    expected_score_range: "0.7–0.9"
+    key_mechanics:
+      - "Alert triage: identify service under stress"
+      - "Log analysis: spot connection pool exhaustion + long query"
+      - "Root cause: recent deploy with new analytics join"
+      - "Remediation: restart, kill query, or rollback"
+
+  - task_id: "medium_cache_cascade"
+    name: "Cascading Cache Failure"
+    difficulty: "medium"
+    description: "Multiple services degraded. Root cause is a Redis cache node that OOM'd and failed over unsuccessfully, causing a thundering herd of database queries. Requires correlating logs across 4+ services and applying multiple remediations."
+    max_steps: 20
+    expected_score_range: "0.5–0.7"
+    key_mechanics:
+      - "Multi-service correlation: user-service, product-service, order-service all degraded"
+      - "Root cause discovery: redis-03 OOM + failed failover + unmapped slots"
+      - "Cascade detection: thundering herd of DB connections due to cache miss"
+      - "Multi-step remediation: restart redis, rate-limit, scale DB, circuit breaker"
+      - "Red herring: order-service shows symptoms but is secondary dependency"
+
+  - task_id: "hard_payment_corruption"
+    name: "Payment Pipeline Corruption"
+    difficulty: "hard"
+    description: "P1 incident with duplicate charges and missing transactions. Multiple root causes: a schema migration that didn't propagate to a database replica (disk full), plus the application retrying on inconsistent state. Red herring alerts from analytics and CDN. Must identify ALL root causes and coordinate multi-step remediation."
+    max_steps: 25
+    expected_score_range: "0.3–0.5"
+    key_mechanics:
+      - "P1 financial impact: $47K discrepancy, duplicate charges, missing transactions"
+      - "Multiple root causes: replica disk full + schema mismatch + bad retry logic"
+      - "Multi-step fix: expand disk, resync, pause retries, rollback, replay DLQ, refund"
+      - "Coordination: escalate to payments + finance teams"
+      - "Red herrings: analytics CPU spike, CDN certificate expiration (unrelated)"
+      - "High complexity: requires identifying causation across 3+ root causes
