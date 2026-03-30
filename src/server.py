@@ -105,3 +105,7 @@ def list_tasks():
             },
         ]
     }
+
+@app.get("/")
+def root():
+    return {"message": "Incident Response Env is running"}
