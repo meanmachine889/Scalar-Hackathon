@@ -27,14 +27,22 @@ import requests
 from openai import OpenAI
 
 # ── Mandatory environment variables ───────────────────────────────────────────
+# ── Mandatory environment variables ───────────────────────────────────────────
 
-API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
-MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
+# Change API_BASE_URL to the hackathon endpoint if needed
+API_BASE_URL = os.getenv("API_BASE_URL", "<hackathon-llm-endpoint>")  
+
+# Keep HF_TOKEN / API_KEY as-is
+API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")  
+
+# Change MODEL_NAME to the model assigned for the hackathon
+MODEL_NAME = os.getenv("MODEL_NAME", "<hackathon-model-name>")  
 
 # ── Environment config ────────────────────────────────────────────────────────
 
-ENV_URL = os.getenv("ENV_URL", "http://localhost:8000")
+# Change ENV_URL to the hackathon OpenEnv URL
+ENV_URL = os.getenv("ENV_URL", "<hackathon-env-url>")
+
 TASK_IDS = ["easy_db_pool", "medium_cache_cascade", "hard_payment_corruption"]
 TEMPERATURE = 0.1
 MAX_TOKENS = 600
