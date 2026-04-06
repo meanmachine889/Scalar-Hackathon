@@ -329,9 +329,12 @@ class IncidentResponseEnv:
         is_new = matched_cmd not in self._commands_run
         self._commands_run.add(matched_cmd)
 
-        # Check if this is a remediation command
+        # Check if this is a remediation command (word-level matching:
+        # all words in a remediation keyword must appear in the command)
+        cmd_lower = matched_cmd.lower()
         is_remediation = any(
-            rem.lower() in matched_cmd.lower() for rem in scenario.valid_remediations
+            all(w in cmd_lower for w in rem.lower().split())
+            for rem in scenario.valid_remediations
         )
 
         if is_new and is_remediation:
@@ -449,6 +452,7 @@ class IncidentResponseEnv:
 
         self._resolve_attempts += 1
 
+        # ── Gate 1: Missing fields ───────────────────────────────────────
         if not root_cause or not remediation:
             reward.penalty = -0.05
             reward.total = -0.05
@@ -463,31 +467,90 @@ class IncidentResponseEnv:
                 metadata={"reward_breakdown": reward.model_dump()},
             )
 
-        # Check root cause identification
-        cause_match = any(
-            cause.lower() in root_cause for cause in scenario.root_causes
-        )
+        # ── Gate 2: Anti-gaming — length limit ───────────────────────────
+        MAX_RESOLVE_LEN = 500
+        if len(root_cause) > MAX_RESOLVE_LEN or len(remediation) > MAX_RESOLVE_LEN:
+            reward.penalty = -0.10
+            reward.total = -0.10
+            reward.reason = "Resolution text too long — be concise and specific (max 500 chars each)"
+            self._cumulative_reward += reward.total
+            return Observation(
+                message=(
+                    "ERROR: root_cause and remediation must each be under 500 characters. "
+                    "Be concise — describe the specific issue and fix, not a laundry list."
+                ),
+                reward=reward.total,
+                cumulative_reward=self._cumulative_reward,
+                step_number=self._step_count,
+                max_steps=scenario.max_steps,
+                metadata={"reward_breakdown": reward.model_dump()},
+            )
 
-        # Check remediation
+        # ── Gate 3: Investigation prerequisite ───────────────────────────
+        relevant_investigated = self._investigated_services & set(scenario.relevant_services)
+        if not self._checked_alerts or not relevant_investigated:
+            reward.penalty = -0.05
+            reward.total = -0.05
+            missing = []
+            if not self._checked_alerts:
+                missing.append("check alerts")
+            if not relevant_investigated:
+                missing.append("investigate relevant services")
+            reward.reason = f"Premature resolve — must first: {', '.join(missing)}"
+            self._cumulative_reward += reward.total
+            return Observation(
+                message=(
+                    "Cannot resolve without investigation. "
+                    f"You still need to: {', '.join(missing)}. "
+                    "Check alerts and investigate service logs/metrics before diagnosing."
+                ),
+                reward=reward.total,
+                cumulative_reward=self._cumulative_reward,
+                step_number=self._step_count,
+                max_steps=scenario.max_steps,
+                metadata={"reward_breakdown": reward.model_dump()},
+            )
+
+        # ── Root cause matching ──────────────────────────────────────────
+        if scenario.root_cause_categories:
+            # Multi-category matching (hard tasks): agent must identify
+            # keywords from at least N distinct root-cause categories
+            matched_cats = sum(
+                1 for _cat, keywords in scenario.root_cause_categories.items()
+                if any(kw.lower() in root_cause for kw in keywords)
+            )
+            cause_match = matched_cats >= scenario.min_root_cause_categories
+            # Partial credit if some but not enough categories matched
+            if not cause_match and matched_cats >= 1:
+                reward.diagnosis_bonus = 0.08
+                self._root_cause_identified = False
+            elif cause_match:
+                reward.diagnosis_bonus = 0.20
+                self._root_cause_identified = True
+        else:
+            # Single-pool matching (easy/medium tasks)
+            cause_match = any(
+                cause.lower() in root_cause for cause in scenario.root_causes
+            )
+            if cause_match:
+                reward.diagnosis_bonus = 0.20
+                self._root_cause_identified = True
+
+        if not cause_match and reward.diagnosis_bonus == 0.0:
+            reward.penalty -= 0.05
+
+        # ── Remediation matching ─────────────────────────────────────────
         fix_match = any(
             rem.lower() in remediation for rem in scenario.valid_remediations
         )
-
-        if cause_match:
-            self._root_cause_identified = True
-            reward.diagnosis_bonus = 0.20
-        else:
-            reward.diagnosis_bonus = 0.0
-            reward.penalty -= 0.05
 
         if fix_match:
             self._remediation_applied = True
             reward.remediation_bonus = 0.15
         else:
-            reward.remediation_bonus = 0.0
             reward.penalty -= 0.05
 
-        # Full resolution bonus
+        # ── Resolution outcome ───────────────────────────────────────────
         if cause_match and fix_match:
             reward.total = reward.diagnosis_bonus + reward.remediation_bonus + 0.10  # completion bonus
             self._done = True
@@ -510,21 +573,21 @@ class IncidentResponseEnv:
                 f"Final score: {self._cumulative_reward:.3f}"
             )
         elif cause_match:
-            reward.total = reward.diagnosis_bonus + reward.penalty
+            reward.total = reward.diagnosis_bonus + reward.remediation_bonus + reward.penalty
             self._cumulative_reward += reward.total
             msg = (
                 f"Root cause correctly identified, but remediation '{action.remediation}' "
                 f"is not effective. Try a different remediation approach."
             )
         elif fix_match:
-            reward.total = reward.remediation_bonus + reward.penalty
+            reward.total = reward.diagnosis_bonus + reward.remediation_bonus + reward.penalty
             self._cumulative_reward += reward.total
             msg = (
                 f"Remediation action noted, but the root cause '{action.root_cause}' "
                 f"doesn't match the actual issue. Investigate further."
             )
         else:
-            reward.total = reward.penalty
+            reward.total = reward.diagnosis_bonus + reward.penalty  # includes partial credit
             self._cumulative_reward += reward.total
             msg = (
                 f"Neither the root cause nor the remediation match. "

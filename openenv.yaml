@@ -133,12 +133,21 @@ reward_scheme:
     - name: "timeout_penalty"
       value: -0.15
       description: "Penalty when max_steps exceeded without resolution"
+    - name: "keyword_stuffing_penalty"
+      value: -0.10
+      description: "Penalty for excessively long root_cause or remediation text (>500 chars)"
+    - name: "premature_resolve_penalty"
+      value: -0.05
+      description: "Penalty for attempting resolve without checking alerts and investigating services"
+    - name: "partial_root_cause_credit"
+      value: 0.08
+      description: "Partial credit for hard task when only 1 of 2+ required root cause categories matched"
 
 tasks:
   - task_id: "easy_db_pool"
     name: "Database Connection Pool Exhaustion"
     difficulty: "easy"
-    description: "Single service (api-gateway) returning HTTP 500s. Logs clearly show connection pool exhaustion caused by a slow analytics query introduced in a recent deploy. Fix by rolling back, killing the query, or restarting."
+    description: "Single service (api-gateway) returning HTTP 500s. Logs clearly show connection pool exhaustion caused by a slow analytics query introduced in a recent deploy. Fix by rolling back, killing the query, or restarting. Includes a red herring notification service."
     max_steps: 15
     expected_score_range: "0.7–0.9"
     key_mechanics:
@@ -172,4 +181,5 @@ tasks:
       - "Multi-step fix: expand disk, resync, pause retries, rollback, replay DLQ, refund"
       - "Coordination: escalate to payments + finance teams"
       - "Red herrings: analytics CPU spike, CDN certificate expiration (unrelated)"
-      - "High complexity: requires identifying causation across 3+ root causes
+      - "High complexity: requires identifying causation across 3+ root causes"
+      - "Multi-category root cause matching: must identify at least 2 of 3 root cause categories for full credit"

@@ -53,4 +53,5 @@ def grade_task(state: State) -> float:
 
 
 def _expected_investigation_count(difficulty: str) -> int:
-    return {"easy": 2, "medium": 3, "hard": 4}.get(difficulty, 2)
+    # hard=3 matches the 3 relevant services (payment-processor, payment-db, message-queue)
+    return {"easy": 2, "medium": 3, "hard": 3}.get(difficulty, 2)
