@@ -60,11 +60,9 @@ def health():
 
 # ── OpenEnv API ───────────────────────────────────────────────────────────────
 @app.post("/reset", response_model=Observation)
-def reset(request: ResetRequest):
-    try:
-        return env.reset(task_id=request.task_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+def reset(request: ResetRequest = None):  # make request optional
+    task_id = request.task_id if request else "easy_db_pool"
+    return env.reset(task_id=task_id)
 
 
 @app.post("/step", response_model=Observation)
