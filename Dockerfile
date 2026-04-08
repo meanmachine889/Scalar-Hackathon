@@ -9,8 +9,7 @@ COPY src/ ./src/
 COPY openenv.yaml .
 COPY baseline.py .
 COPY README.md .
-COPY inference.py .
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn src.server:app --host 0.0.0.0 --port ${PORT:-7860} --proxy-headers --forwarded-allow-ips '*' & sleep 5 && python inference.py"]
+CMD ["sh", "-c", "uvicorn src.server:app --host 0.0.0.0 --port ${PORT:-7860} --proxy-headers --forwarded-allow-ips '*'"]
