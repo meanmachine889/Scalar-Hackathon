@@ -220,13 +220,13 @@ def parse_model_action(response_text: str) -> Dict[str, Any]:
 
 def run_task_expert(task_id: str) -> Dict[str, Any]:
     """Run a task using the hardcoded expert policy (no LLM)."""
-    print(f"\nSTART {json.dumps({'task_id': task_id, 'mode': 'expert'})}")
+    print(f"\n[START] task={task_id} mode=expert", flush=True)
 
     resp = safe_post(f"{ENV_URL}/reset", json={"task_id": task_id})
     if resp is None:
         print(f"  Skipping task {task_id}: could not reset environment.")
         result = {"task_id": task_id, "steps": 0, "cumulative_reward": 0, "grade": 0.0, "done": False}
-        print(f"END {json.dumps(result)}")
+        print(f"[END] task={task_id} score=0.0 steps=0", flush=True)
         return result
     obs = resp.json()
 
@@ -239,12 +239,12 @@ def run_task_expert(task_id: str) -> Dict[str, Any]:
 
         resp = safe_post(f"{ENV_URL}/step", json={"action": action})
         if resp is None:
-            print(f"STEP {json.dumps({'step': step_count, 'action': action_type, 'error': 'request_failed'})}")
+            print(f"[STEP] step={step_count} action={action_type} error=request_failed", flush=True)
             break
         obs = resp.json()
 
         reward = obs.get("reward", 0)
-        print(f"STEP {json.dumps({'step': step_count, 'action': action_type, 'reward': round(reward, 4), 'cumulative_reward': round(obs.get('cumulative_reward', 0), 4), 'done': obs.get('done', False)})}")
+        print(f"[STEP] step={step_count} action={action_type} reward={round(reward, 4)} cumulative_reward={round(obs.get('cumulative_reward', 0), 4)} done={obs.get('done', False)}", flush=True)
 
         if obs.get("done", False):
             break
@@ -261,19 +261,19 @@ def run_task_expert(task_id: str) -> Dict[str, Any]:
         "grade": round(grade_score, 4),
         "done": obs.get("done", False),
     }
-    print(f"END {json.dumps(result)}")
+    print(f"[END] task={task_id} score={round(grade_score, 4)} steps={step_count}", flush=True)
     return result
 
 
 def run_task_llm(client: OpenAI, task_id: str) -> Dict[str, Any]:
     """Run a task using an LLM agent via the OpenAI client."""
-    print(f"\nSTART {json.dumps({'task_id': task_id, 'mode': 'llm', 'model': MODEL_NAME})}")
+    print(f"\n[START] task={task_id} mode=llm model={MODEL_NAME}", flush=True)
 
     resp = safe_post(f"{ENV_URL}/reset", json={"task_id": task_id})
     if resp is None:
         print(f"  Skipping task {task_id}: could not reset environment.")
         result = {"task_id": task_id, "steps": 0, "cumulative_reward": 0, "grade": 0.0, "done": False}
-        print(f"END {json.dumps(result)}")
+        print(f"[END] task={task_id} score=0.0 steps=0", flush=True)
         return result
     obs = resp.json()
     max_steps = obs.get("max_steps", 15)
@@ -311,12 +311,12 @@ def run_task_llm(client: OpenAI, task_id: str) -> Dict[str, Any]:
         # Execute action
         resp = safe_post(f"{ENV_URL}/step", json={"action": action})
         if resp is None:
-            print(f"STEP {json.dumps({'step': step_count, 'action': action_type, 'error': 'request_failed'})}")
+            print(f"[STEP] step={step_count} action={action_type} error=request_failed", flush=True)
             break
         obs = resp.json()
 
         reward = obs.get("reward", 0)
-        print(f"STEP {json.dumps({'step': step_count, 'action': action_type, 'reward': round(reward, 4), 'cumulative_reward': round(obs.get('cumulative_reward', 0), 4), 'done': obs.get('done', False)})}")
+        print(f"[STEP] step={step_count} action={action_type} reward={round(reward, 4)} cumulative_reward={round(obs.get('cumulative_reward', 0), 4)} done={obs.get('done', False)}", flush=True)
 
         # Update conversation for LLM
         obs_text = build_observation_text(obs)
@@ -348,7 +348,7 @@ def run_task_llm(client: OpenAI, task_id: str) -> Dict[str, Any]:
         "grade": round(grade_score, 4),
         "done": obs.get("done", False),
     }
-    print(f"END {json.dumps(result)}")
+    print(f"[END] task={task_id} score={round(grade_score, 4)} steps={step_count}", flush=True)
     return result
 
 
