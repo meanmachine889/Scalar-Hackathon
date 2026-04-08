@@ -5,13 +5,13 @@ MANDATORY
 - Before submitting, ensure the following variables are defined in your environment configuration:
     API_BASE_URL   The API endpoint for the LLM.
     MODEL_NAME     The model identifier to use for inference.
-    HF_TOKEN       Your Hugging Face / API key.
+    API_KEY        The hackathon-injected API key.
 
 - The inference script must be named `inference.py` and placed in the root directory of the project
 - Participants must use OpenAI Client for all LLM calls using above variables
 
 Modes:
-    python inference.py             # LLM mode (requires API_BASE_URL, MODEL_NAME, HF_TOKEN)
+    python inference.py             # LLM mode (requires API_BASE_URL, MODEL_NAME, API_KEY)
     python inference.py --expert    # Expert policy (no LLM needed, reproducible scores)
 """
 
@@ -60,14 +60,13 @@ def safe_post(url: str, **kwargs) -> Optional[requests.Response]:
 
 # ── Mandatory environment variables ───────────────────────────────────────────
 
-API_BASE_URL = os.getenv("API_BASE_URL", "<hackathon-llm-endpoint>")
+API_BASE_URL = os.environ["API_BASE_URL"]
 MODEL_NAME = os.getenv("MODEL_NAME", "<hackathon-model-name>")
 API_KEY = os.getenv("API_KEY") or os.getenv("HF_TOKEN")
 
 # ── Environment config ────────────────────────────────────────────────────────
 
-# Change ENV_URL to the hackathon OpenEnv URL
-ENV_URL = os.getenv("ENV_URL", "<hackathon-env-url>")
+ENV_URL = os.getenv("ENV_URL", "http://localhost:7860")
 
 TASK_IDS = ["easy_db_pool", "medium_cache_cascade", "hard_payment_corruption"]
 TEMPERATURE = 0.1
