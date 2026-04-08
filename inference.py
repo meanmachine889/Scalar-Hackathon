@@ -59,16 +59,10 @@ def safe_post(url: str, **kwargs) -> Optional[requests.Response]:
         return None
 
 # ── Mandatory environment variables ───────────────────────────────────────────
-# ── Mandatory environment variables ───────────────────────────────────────────
 
-# Change API_BASE_URL to the hackathon endpoint if needed
-API_BASE_URL = os.getenv("API_BASE_URL", "<hackathon-llm-endpoint>")  
-
-# Keep HF_TOKEN / API_KEY as-is
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")  
-
-# Change MODEL_NAME to the model assigned for the hackathon
-MODEL_NAME = os.getenv("MODEL_NAME", "<hackathon-model-name>")  
+API_BASE_URL = os.getenv("API_BASE_URL", "<hackathon-llm-endpoint>")
+MODEL_NAME = os.getenv("MODEL_NAME", "<hackathon-model-name>")
+HF_TOKEN = os.getenv("HF_TOKEN")
 
 # ── Environment config ────────────────────────────────────────────────────────
 
@@ -226,16 +220,15 @@ def parse_model_action(response_text: str) -> Dict[str, Any]:
 
 def run_task_expert(task_id: str) -> Dict[str, Any]:
     """Run a task using the hardcoded expert policy (no LLM)."""
-    print(f"\n{'='*60}")
-    print(f"TASK: {task_id} (expert policy)")
-    print(f"{'='*60}")
+    print(f"\nSTART {json.dumps({'task_id': task_id, 'mode': 'expert'})}")
 
     resp = safe_post(f"{ENV_URL}/reset", json={"task_id": task_id})
     if resp is None:
         print(f"  Skipping task {task_id}: could not reset environment.")
-        return {"task_id": task_id, "steps": 0, "cumulative_reward": 0, "grade": 0.0, "done": False}
+        result = {"task_id": task_id, "steps": 0, "cumulative_reward": 0, "grade": 0.0, "done": False}
+        print(f"END {json.dumps(result)}")
+        return result
     obs = resp.json()
-    print(f"Episode goal: {obs['message'][:150]}...")
 
     policy = EXPERT_POLICIES[task_id]
     step_count = 0
@@ -243,52 +236,47 @@ def run_task_expert(task_id: str) -> Dict[str, Any]:
     for action in policy:
         step_count += 1
         action_type = action.get("action_type", "?")
-        detail = action.get("service") or action.get("command") or action.get("team") or ""
-        print(f"  Step {step_count}: {action_type}" + (f" ({detail})" if detail else ""))
 
         resp = safe_post(f"{ENV_URL}/step", json={"action": action})
         if resp is None:
-            print(f"    Step failed, stopping episode.")
+            print(f"STEP {json.dumps({'step': step_count, 'action': action_type, 'error': 'request_failed'})}")
             break
         obs = resp.json()
 
         reward = obs.get("reward", 0)
-        print(f"    Reward: {reward:+.3f} | Cumulative: {obs.get('cumulative_reward', 0):.3f} | Done: {obs.get('done')}")
+        print(f"STEP {json.dumps({'step': step_count, 'action': action_type, 'reward': round(reward, 4), 'cumulative_reward': round(obs.get('cumulative_reward', 0), 4), 'done': obs.get('done', False)})}")
 
         if obs.get("done", False):
             break
 
     grade_resp = safe_post(f"{ENV_URL}/grade")
-    if grade_resp is None:
-        print(f"  Could not grade task {task_id}.")
-        return {"task_id": task_id, "steps": step_count, "cumulative_reward": obs.get("cumulative_reward", 0), "grade": 0.0, "done": obs.get("done", False)}
-    grade = grade_resp.json()
+    grade_score = 0.0
+    if grade_resp is not None:
+        grade_score = grade_resp.json().get("score", 0.0)
 
-    print(f"\n  GRADE: {grade['score']:.4f}")
-
-    return {
+    result = {
         "task_id": task_id,
         "steps": step_count,
-        "cumulative_reward": obs.get("cumulative_reward", 0),
-        "grade": grade["score"],
+        "cumulative_reward": round(obs.get("cumulative_reward", 0), 4),
+        "grade": round(grade_score, 4),
         "done": obs.get("done", False),
     }
+    print(f"END {json.dumps(result)}")
+    return result
 
 
 def run_task_llm(client: OpenAI, task_id: str) -> Dict[str, Any]:
     """Run a task using an LLM agent via the OpenAI client."""
-    print(f"\n{'='*60}")
-    print(f"TASK: {task_id}")
-    print(f"{'='*60}")
+    print(f"\nSTART {json.dumps({'task_id': task_id, 'mode': 'llm', 'model': MODEL_NAME})}")
 
     resp = safe_post(f"{ENV_URL}/reset", json={"task_id": task_id})
     if resp is None:
         print(f"  Skipping task {task_id}: could not reset environment.")
-        return {"task_id": task_id, "steps": 0, "cumulative_reward": 0, "grade": 0.0, "done": False}
+        result = {"task_id": task_id, "steps": 0, "cumulative_reward": 0, "grade": 0.0, "done": False}
+        print(f"END {json.dumps(result)}")
+        return result
     obs = resp.json()
     max_steps = obs.get("max_steps", 15)
-
-    print(f"Episode goal: {obs['message'][:150]}...")
 
     obs_text = build_observation_text(obs)
     messages = [
@@ -319,19 +307,16 @@ def run_task_llm(client: OpenAI, task_id: str) -> Dict[str, Any]:
 
         step_count += 1
         action_type = action.get("action_type", "check_alerts")
-        detail = action.get("service") or action.get("command") or action.get("team") or ""
-        print(f"  Step {step_count}: {action_type}" + (f" ({detail})" if detail else ""))
 
         # Execute action
         resp = safe_post(f"{ENV_URL}/step", json={"action": action})
         if resp is None:
-            print(f"    Step failed, stopping episode.")
+            print(f"STEP {json.dumps({'step': step_count, 'action': action_type, 'error': 'request_failed'})}")
             break
         obs = resp.json()
 
         reward = obs.get("reward", 0)
-        error_flag = ""
-        print(f"    Reward: {reward:+.3f} | Cumulative: {obs.get('cumulative_reward', 0):.3f} | Done: {obs.get('done')}")
+        print(f"STEP {json.dumps({'step': step_count, 'action': action_type, 'reward': round(reward, 4), 'cumulative_reward': round(obs.get('cumulative_reward', 0), 4), 'done': obs.get('done', False)})}")
 
         # Update conversation for LLM
         obs_text = build_observation_text(obs)
@@ -346,27 +331,25 @@ def run_task_llm(client: OpenAI, task_id: str) -> Dict[str, Any]:
         )}]})
 
         if obs.get("done", False):
-            print("  Episode complete.")
             break
     else:
         if not obs.get("done", False):
             print(f"  Reached max steps ({max_steps}).")
 
     grade_resp = safe_post(f"{ENV_URL}/grade")
-    if grade_resp is None:
-        print(f"  Could not grade task {task_id}.")
-        return {"task_id": task_id, "steps": step_count, "cumulative_reward": obs.get("cumulative_reward", 0), "grade": 0.0, "done": obs.get("done", False)}
-    grade = grade_resp.json()
+    grade_score = 0.0
+    if grade_resp is not None:
+        grade_score = grade_resp.json().get("score", 0.0)
 
-    print(f"\n  GRADE: {grade['score']:.4f}")
-
-    return {
+    result = {
         "task_id": task_id,
         "steps": step_count,
-        "cumulative_reward": obs.get("cumulative_reward", 0),
-        "grade": grade["score"],
+        "cumulative_reward": round(obs.get("cumulative_reward", 0), 4),
+        "grade": round(grade_score, 4),
         "done": obs.get("done", False),
     }
+    print(f"END {json.dumps(result)}")
+    return result
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -381,11 +364,11 @@ def main() -> None:
         print("Inference Script — EXPERT MODE (no LLM, reproducible baseline)")
         print(f"Environment: {ENV_URL}")
     else:
-        if not API_KEY:
-            print("ERROR: Set HF_TOKEN or API_KEY environment variable, or use --expert mode")
+        if not HF_TOKEN:
+            print("ERROR: Set HF_TOKEN environment variable, or use --expert mode")
             sys.exit(1)
 
-        client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+        client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
         print("Inference Script — Incident Response Environment")
         print(f"API Base URL: {API_BASE_URL}")
