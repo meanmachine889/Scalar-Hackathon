@@ -1,14 +1,16 @@
-"""Programmatic graders for each task. Score 0.0–1.0."""
+"""Programmatic graders for each task. Score strictly between 0 and 1."""
 
 from __future__ import annotations
 
 from src.models import State
 
+EPS = 1e-6  # ensures score is never exactly 0 or 1
+
 
 def grade_task(state: State) -> float:
     """Grade the agent's performance on a completed episode.
 
-    Returns a score between 0.0 and 1.0.
+    Returns a score strictly between 0 and 1 (exclusive).
 
     Scoring breakdown:
     - Investigation thoroughness: 0.0–0.25
@@ -49,7 +51,10 @@ def grade_task(state: State) -> float:
         efficiency = max(0.0, 1.0 - steps_ratio)
         score += 0.15 * efficiency
 
-    return round(min(1.0, max(0.0, score)), 4)
+    # Clamp to (0, 1) strictly
+    score = min(1.0 - EPS, max(EPS, score))
+
+    return round(score, 4)
 
 
 def _expected_investigation_count(difficulty: str) -> int:
