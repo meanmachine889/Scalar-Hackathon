@@ -26,6 +26,38 @@ from typing import Any, Dict, List, Optional
 import requests
 from openai import OpenAI
 
+# ── Network helpers ──────────────────────────────────────────────────────────
+
+REQUEST_TIMEOUT = 30  # seconds per HTTP call
+
+
+def wait_for_env(env_url: str, retries: int = 10, delay: float = 3.0) -> bool:
+    """Block until the environment server is reachable, or give up."""
+    for attempt in range(1, retries + 1):
+        try:
+            r = requests.get(f"{env_url}/health", timeout=10)
+            if r.status_code == 200:
+                print(f"Environment reachable (attempt {attempt}).")
+                return True
+        except requests.RequestException:
+            pass
+        print(f"Waiting for environment ({attempt}/{retries})...")
+        time.sleep(delay)
+    print("ERROR: Environment not reachable after retries.")
+    return False
+
+
+def safe_post(url: str, **kwargs) -> Optional[requests.Response]:
+    """POST with timeout and exception handling. Returns None on failure."""
+    kwargs.setdefault("timeout", REQUEST_TIMEOUT)
+    try:
+        resp = requests.post(url, **kwargs)
+        resp.raise_for_status()
+        return resp
+    except requests.RequestException as exc:
+        print(f"  HTTP error for {url}: {exc}")
+        return None
+
 # ── Mandatory environment variables ───────────────────────────────────────────
 # ── Mandatory environment variables ───────────────────────────────────────────
 
@@ -198,8 +230,10 @@ def run_task_expert(task_id: str) -> Dict[str, Any]:
     print(f"TASK: {task_id} (expert policy)")
     print(f"{'='*60}")
 
-    resp = requests.post(f"{ENV_URL}/reset", json={"task_id": task_id})
-    resp.raise_for_status()
+    resp = safe_post(f"{ENV_URL}/reset", json={"task_id": task_id})
+    if resp is None:
+        print(f"  Skipping task {task_id}: could not reset environment.")
+        return {"task_id": task_id, "steps": 0, "cumulative_reward": 0, "grade": 0.0, "done": False}
     obs = resp.json()
     print(f"Episode goal: {obs['message'][:150]}...")
 
@@ -212,8 +246,10 @@ def run_task_expert(task_id: str) -> Dict[str, Any]:
         detail = action.get("service") or action.get("command") or action.get("team") or ""
         print(f"  Step {step_count}: {action_type}" + (f" ({detail})" if detail else ""))
 
-        resp = requests.post(f"{ENV_URL}/step", json={"action": action})
-        resp.raise_for_status()
+        resp = safe_post(f"{ENV_URL}/step", json={"action": action})
+        if resp is None:
+            print(f"    Step failed, stopping episode.")
+            break
         obs = resp.json()
 
         reward = obs.get("reward", 0)
@@ -222,8 +258,10 @@ def run_task_expert(task_id: str) -> Dict[str, Any]:
         if obs.get("done", False):
             break
 
-    grade_resp = requests.post(f"{ENV_URL}/grade")
-    grade_resp.raise_for_status()
+    grade_resp = safe_post(f"{ENV_URL}/grade")
+    if grade_resp is None:
+        print(f"  Could not grade task {task_id}.")
+        return {"task_id": task_id, "steps": step_count, "cumulative_reward": obs.get("cumulative_reward", 0), "grade": 0.0, "done": obs.get("done", False)}
     grade = grade_resp.json()
 
     print(f"\n  GRADE: {grade['score']:.4f}")
@@ -243,8 +281,10 @@ def run_task_llm(client: OpenAI, task_id: str) -> Dict[str, Any]:
     print(f"TASK: {task_id}")
     print(f"{'='*60}")
 
-    resp = requests.post(f"{ENV_URL}/reset", json={"task_id": task_id})
-    resp.raise_for_status()
+    resp = safe_post(f"{ENV_URL}/reset", json={"task_id": task_id})
+    if resp is None:
+        print(f"  Skipping task {task_id}: could not reset environment.")
+        return {"task_id": task_id, "steps": 0, "cumulative_reward": 0, "grade": 0.0, "done": False}
     obs = resp.json()
     max_steps = obs.get("max_steps", 15)
 
@@ -283,8 +323,10 @@ def run_task_llm(client: OpenAI, task_id: str) -> Dict[str, Any]:
         print(f"  Step {step_count}: {action_type}" + (f" ({detail})" if detail else ""))
 
         # Execute action
-        resp = requests.post(f"{ENV_URL}/step", json={"action": action})
-        resp.raise_for_status()
+        resp = safe_post(f"{ENV_URL}/step", json={"action": action})
+        if resp is None:
+            print(f"    Step failed, stopping episode.")
+            break
         obs = resp.json()
 
         reward = obs.get("reward", 0)
@@ -310,8 +352,10 @@ def run_task_llm(client: OpenAI, task_id: str) -> Dict[str, Any]:
         if not obs.get("done", False):
             print(f"  Reached max steps ({max_steps}).")
 
-    grade_resp = requests.post(f"{ENV_URL}/grade")
-    grade_resp.raise_for_status()
+    grade_resp = safe_post(f"{ENV_URL}/grade")
+    if grade_resp is None:
+        print(f"  Could not grade task {task_id}.")
+        return {"task_id": task_id, "steps": step_count, "cumulative_reward": obs.get("cumulative_reward", 0), "grade": 0.0, "done": obs.get("done", False)}
     grade = grade_resp.json()
 
     print(f"\n  GRADE: {grade['score']:.4f}")
@@ -347,6 +391,10 @@ def main() -> None:
         print(f"API Base URL: {API_BASE_URL}")
         print(f"Model: {MODEL_NAME}")
         print(f"Environment: {ENV_URL}")
+
+    # Wait for the environment server to be ready before running tasks
+    if not wait_for_env(ENV_URL):
+        print("WARNING: Environment not reachable. Will attempt tasks anyway.")
 
     results = []
     for task_id in TASK_IDS:
