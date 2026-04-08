@@ -5,13 +5,14 @@ MANDATORY
 - Before submitting, ensure the following variables are defined in your environment configuration:
     API_BASE_URL   The API endpoint for the LLM.
     MODEL_NAME     The model identifier to use for inference.
-    HF_TOKEN       Your Hugging Face / API key.
+    API_KEY        The hackathon-injected API key (falls back to HF_TOKEN for local dev).
+    HF_TOKEN       Your Hugging Face / API key (local dev fallback).
 
 - The inference script must be named `inference.py` and placed in the root directory of the project
 - Participants must use OpenAI Client for all LLM calls using above variables
 
 Modes:
-    python inference.py             # LLM mode (requires API_BASE_URL, MODEL_NAME, HF_TOKEN)
+    python inference.py             # LLM mode (requires API_BASE_URL, MODEL_NAME, API_KEY)
     python inference.py --expert    # Expert policy (no LLM needed, reproducible scores)
 """
 
@@ -62,7 +63,8 @@ def safe_post(url: str, **kwargs) -> Optional[requests.Response]:
 
 API_BASE_URL = os.getenv("API_BASE_URL", "<hackathon-llm-endpoint>")
 MODEL_NAME = os.getenv("MODEL_NAME", "<hackathon-model-name>")
-HF_TOKEN = os.getenv("HF_TOKEN")
+# FIX: Use API_KEY injected by the hackathon proxy; fall back to HF_TOKEN for local dev
+API_KEY = os.getenv("API_KEY") or os.getenv("HF_TOKEN")
 
 # ── Environment config ────────────────────────────────────────────────────────
 
@@ -364,11 +366,13 @@ def main() -> None:
         print("Inference Script — EXPERT MODE (no LLM, reproducible baseline)")
         print(f"Environment: {ENV_URL}")
     else:
-        if not HF_TOKEN:
-            print("ERROR: Set HF_TOKEN environment variable, or use --expert mode")
+        # FIX: Check API_KEY (hackathon-injected) instead of HF_TOKEN
+        if not API_KEY:
+            print("ERROR: Set API_KEY (or HF_TOKEN) environment variable, or use --expert mode")
             sys.exit(1)
 
-        client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
+        # FIX: Pass API_KEY so calls route through the hackathon's LiteLLM proxy correctly
+        client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
         print("Inference Script — Incident Response Environment")
         print(f"API Base URL: {API_BASE_URL}")
