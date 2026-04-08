@@ -5,8 +5,7 @@ MANDATORY
 - Before submitting, ensure the following variables are defined in your environment configuration:
     API_BASE_URL   The API endpoint for the LLM.
     MODEL_NAME     The model identifier to use for inference.
-    API_KEY        The hackathon-injected API key (falls back to HF_TOKEN for local dev).
-    HF_TOKEN       Your Hugging Face / API key (local dev fallback).
+    API_KEY        The hackathon-injected API key.
 
 - The inference script must be named `inference.py` and placed in the root directory of the project
 - Participants must use OpenAI Client for all LLM calls using above variables
@@ -61,10 +60,10 @@ def safe_post(url: str, **kwargs) -> Optional[requests.Response]:
 
 # ── Mandatory environment variables ───────────────────────────────────────────
 
-API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
+API_BASE_URL = os.environ["API_BASE_URL"]
 MODEL_NAME = os.getenv("MODEL_NAME", "<hackathon-model-name>")
-# FIX: Use API_KEY injected by the hackathon proxy; fall back to HF_TOKEN for local dev
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
+
+API_KEY = os.environ["API_KEY"]
 
 # ── Environment config ────────────────────────────────────────────────────────
 
@@ -366,12 +365,6 @@ def main() -> None:
         print("Inference Script — EXPERT MODE (no LLM, reproducible baseline)")
         print(f"Environment: {ENV_URL}")
     else:
-        # FIX: Check API_KEY (hackathon-injected) instead of HF_TOKEN
-        if not API_KEY:
-            print("ERROR: Set API_KEY (or HF_TOKEN) environment variable, or use --expert mode")
-            sys.exit(1)
-
-        # FIX: Pass API_KEY so calls route through the hackathon's LiteLLM proxy correctly
         client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
         print("Inference Script — Incident Response Environment")
@@ -409,4 +402,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    
