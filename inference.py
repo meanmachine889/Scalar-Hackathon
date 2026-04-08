@@ -67,8 +67,7 @@ API_KEY = os.environ["API_KEY"]
 
 # ── Environment config ────────────────────────────────────────────────────────
 
-# Change ENV_URL to the hackathon OpenEnv URL
-ENV_URL = os.getenv("ENV_URL", "<hackathon-env-url>")
+ENV_URL = os.getenv("ENV_URL", "http://localhost:7860")
 
 TASK_IDS = ["easy_db_pool", "medium_cache_cascade", "hard_payment_corruption"]
 TEMPERATURE = 0.1
