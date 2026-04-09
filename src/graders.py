@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from src.models import State
 
-EPS = 1e-6  # ensures score is never exactly 0 or 1
+EPS = 1e-4  # ensures score is never exactly 0 or 1 after round(..., 4)
 
 
 def grade_task(state: State) -> float:
@@ -54,13 +54,7 @@ def grade_task(state: State) -> float:
     # Clamp to (0, 1) strictly
     score = min(1.0 - EPS, max(EPS, score))
 
-    # Final safety: ensure rounding never produces exactly 0.0 or 1.0
-    result = round(score, 4)
-    if result <= 0.0:
-        result = EPS
-    if result >= 1.0:
-        result = 1.0 - EPS
-    return result
+    return round(score, 4)
 
 
 def _expected_investigation_count(difficulty: str) -> int:
