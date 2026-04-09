@@ -13,4 +13,4 @@ COPY inference.py .
 
 EXPOSE 7860
 
-CMD ["sh", "-c", "uvicorn src.server:app --host 0.0.0.0 --port 7860 --proxy-headers --forwarded-allow-ips '*' & python inference.py"]
+CMD ["uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "7860"]
