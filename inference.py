@@ -89,8 +89,7 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
 # ── Safe score ────────────────────────────────────────────────────────────────
 
 def _safe_score(value: float) -> float:
-    clamped = min(1.0 - EPS, max(EPS, float(value)))
-    return float(f"{clamped:.4f}")
+    return max(EPS, min(1.0 - EPS, float(value)))
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 
