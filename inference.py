@@ -194,7 +194,7 @@ def run_task_expert(task_id: str) -> Dict[str, Any]:
 
     resp = safe_post(f"{ENV_URL}/reset", json={"task_id": task_id})
     if resp is None:
-        return {"task_id": task_id, "steps": 0, "cumulative_reward": 0, "grade": 1e-4, "done": False}
+        return {"task_id": task_id, "steps": 0, "cumulative_reward": 0, "grade": 0.0, "done": False}
     
     obs = resp.json()
     policy = EXPERT_POLICIES.get(task_id, [])
@@ -233,7 +233,7 @@ def run_task_llm(client: OpenAI, model_name: str, task_id: str) -> Dict[str, Any
 
     resp = safe_post(f"{ENV_URL}/reset", json={"task_id": task_id})
     if resp is None:
-        return {"task_id": task_id, "steps": 0, "cumulative_reward": 0, "grade": 1e-4, "done": False}
+        return {"task_id": task_id, "steps": 0, "cumulative_reward": 0, "grade": 0.0, "done": False}
     
     obs = resp.json()
     max_steps = obs.get("max_steps", 15)
@@ -353,6 +353,20 @@ def main() -> None:
     avg_grade = sum(r["grade"] for r in results) / len(results)
     print("-" * 60)
     print(f"{'Average (' + mode_label + ')':<30} {avg_grade:>8.4f}")
+
+    # Write results.json for validator output parsing
+    results_file = "results.json"
+    with open(results_file, "w") as f:
+        json.dump({
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "mode": "expert" if expert_mode else "llm",
+            "model": model_name if not expert_mode else "N/A",
+            "environment": ENV_URL,
+            "tasks": results,
+            "average_grade": avg_grade,
+            "test_status": "PASSED" if avg_grade > 0.3 else "FAILED",
+        }, f, indent=2)
+    print(f"\nResults saved to {results_file}")
 
 
 if __name__ == "__main__":
