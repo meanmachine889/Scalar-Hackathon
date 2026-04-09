@@ -208,7 +208,7 @@ def run_task_expert(task_id: str) -> Dict[str, Any]:
 
     resp = safe_post(f"{ENV_URL}/reset", json={"task_id": task_id})
     if resp is None:
-        return {"task_id": task_id, "steps": 0, "cumulative_reward": 0, "grade": _safe_grade(0), "done": False}
+        return {"task_id": task_id, "steps": 0, "cumulative_reward": _safe_grade(0), "grade": _safe_grade(0), "done": False}
 
     obs = resp.json()
     policy = EXPERT_POLICIES.get(task_id, [])
@@ -246,7 +246,7 @@ def run_task_llm(client: OpenAI, model_name: str, task_id: str) -> Dict[str, Any
 
     resp = safe_post(f"{ENV_URL}/reset", json={"task_id": task_id})
     if resp is None:
-        return {"task_id": task_id, "steps": 0, "cumulative_reward": 0, "grade": _safe_grade(0), "done": False}
+        return {"task_id": task_id, "steps": 0, "cumulative_reward": _safe_grade(0), "grade": _safe_grade(0), "done": False}
 
     obs = resp.json()
     max_steps = obs.get("max_steps", 15)
@@ -313,16 +313,14 @@ def run_task_llm(client: OpenAI, model_name: str, task_id: str) -> Dict[str, Any
 
 def _write_results(tasks: list, mode: str, model_name: str) -> None:
     """Write results.json for the validator.
-    Each task dict has ONLY task_id + score (no extra float fields).
-    Uses 'score' key to match server.py GradeResponse schema.
-    All values clamped strictly to (0, 1).
+    Each task dict has ONLY task_id + score.
+    ALL float values clamped strictly to (0, 1) — no raw floats anywhere.
     """
     safe_tasks = []
     for t in tasks:
-        raw = t.get("grade", t.get("score", EPS))
         safe_tasks.append({
             "task_id": t["task_id"],
-            "score": _safe_grade(raw),
+            "score": _safe_grade(t.get("grade", t.get("score", EPS))),
         })
 
     avg = _safe_grade(sum(t["score"] for t in safe_tasks) / len(safe_tasks) if safe_tasks else EPS)
@@ -353,11 +351,8 @@ def main() -> None:
 
         if not api_base or not api_key:
             print("ERROR: API_BASE_URL and an API_KEY (or HF_TOKEN) must be set.")
-            # Write a safe fallback results.json before exiting so the validator
-            # never reads a stale committed file with out-of-range scores.
             _write_results(
-                [{"task_id": tid, "steps": 0, "cumulative_reward": 0, "grade": _safe_grade(0), "done": False}
-                 for tid in TASK_IDS],
+                [{"task_id": tid, "grade": _safe_grade(0)} for tid in TASK_IDS],
                 mode="llm",
                 model_name=model_name,
             )
