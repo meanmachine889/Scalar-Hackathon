@@ -69,6 +69,9 @@ MAX_TOKENS = 600
 FALLBACK_ACTION = {"action_type": "check_alerts"}
 ACTION_JSON_RE = re.compile(r"\{[^{}]*\}", re.DOTALL)
 
+# EPS must survive round(..., 4): 1e-4 rounds to 0.0001, 1.0-1e-4 rounds to 0.9999
+EPS = 1e-4
+
 # ── System prompt ─────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = textwrap.dedent("""\
@@ -102,20 +105,31 @@ EXPERT_POLICIES: Dict[str, List[Dict[str, Any]]] = {
         {"action_type": "communicate", "message": "Investigating api-gateway 500s. Connection pool exhausted."},
         {"action_type": "escalate", "team": "database"},
         {"action_type": "run_command", "command": "rollback api-gateway 2.14.2"},
-        {"action_type": "resolve", "root_cause": "Connection pool exhaustion", "remediation": "Rollback api-gateway"},
+        {"action_type": "resolve", "root_cause": "Connection pool exhaustion caused by slow analytics query introduced in v2.14.3 deploy", "remediation": "Rollback api-gateway to v2.14.2 and kill long-running query"},
     ],
     "medium_cache_cascade": [
         {"action_type": "check_alerts"},
         {"action_type": "read_logs", "service": "redis-cluster"},
+        {"action_type": "read_logs", "service": "user-service"},
+        {"action_type": "read_logs", "service": "product-service"},
+        {"action_type": "read_logs", "service": "database"},
         {"action_type": "check_metrics", "service": "redis-cluster"},
         {"action_type": "run_command", "command": "redis-restart redis-03"},
         {"action_type": "run_command", "command": "enable-rate-limit user-service"},
         {"action_type": "escalate", "team": "infrastructure"},
-        {"action_type": "resolve", "root_cause": "Redis node OOM", "remediation": "Restarted redis-03, enabled rate limits"},
+        {"action_type": "communicate", "message": "Redis-03 OOM caused cluster degradation. Thundering herd to DB. Restarting redis-03 and enabling rate limits."},
+        {"action_type": "resolve", "root_cause": "Redis node redis-03 ran OOM causing cache failure and thundering herd to database", "remediation": "Restarted redis-03 with increased memory, enabled rate-limiting on affected services"},
     ],
     "hard_payment_corruption": [
         {"action_type": "check_alerts"},
         {"action_type": "read_logs", "service": "payment-processor"},
+        {"action_type": "read_logs", "service": "payment-db"},
+        {"action_type": "read_logs", "service": "message-queue"},
+        {"action_type": "check_metrics", "service": "payment-processor"},
+        {"action_type": "check_metrics", "service": "payment-db"},
+        {"action_type": "communicate", "message": "P1: Payment duplication and missing transactions. Schema migration in v3.8.0 did not propagate to replica-2 (disk full). Investigating replication + idempotency failure."},
+        {"action_type": "escalate", "team": "payments"},
+        {"action_type": "escalate", "team": "finance"},
         {"action_type": "run_command", "command": "pause payment-processor retries"},
         {"action_type": "run_command", "command": "enable-maintenance payment-processor"},
         {"action_type": "run_command", "command": "expand-disk replica-2 500GB"},
@@ -125,17 +139,17 @@ EXPERT_POLICIES: Dict[str, List[Dict[str, Any]]] = {
         {"action_type": "run_command", "command": "run-reconciliation"},
         {"action_type": "run_command", "command": "refund-duplicates"},
         {"action_type": "run_command", "command": "disable-maintenance payment-processor"},
-        {"action_type": "resolve", "root_cause": "Schema migration failed", "remediation": "Rollback, expand disk, resync, refund"},
+        {"action_type": "resolve", "root_cause": "Schema migration in v3.8.0 failed to propagate to replica-2 (disk full), causing idempotency check failures and duplicate charges", "remediation": "Rollback to v3.7.9, expand disk on replica-2, resync replication, replay DLQ, refund duplicates"},
     ],
 }
 
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-EPS = 1e-4
-
-
-def _safe_score(value: float) -> float:
-    """Clamp to strictly open (0, 1) and round to 4dp."""
+def _safe_grade(value: float) -> float:
+    """Clamp to strictly open (0, 1) and round to 4dp.
+    1e-4 -> 0.0001 (valid), 1.0-1e-4 -> 0.9999 (valid).
+    """
     return round(min(1.0 - EPS, max(EPS, float(value))), 4)
 
 
@@ -194,7 +208,7 @@ def run_task_expert(task_id: str) -> Dict[str, Any]:
 
     resp = safe_post(f"{ENV_URL}/reset", json={"task_id": task_id})
     if resp is None:
-        return {"task_id": task_id, "score": _safe_score(0)}
+        return {"task_id": task_id, "steps": 0, "cumulative_reward": 0, "grade": _safe_grade(0), "done": False}
 
     obs = resp.json()
     policy = EXPERT_POLICIES.get(task_id, [])
@@ -213,11 +227,17 @@ def run_task_expert(task_id: str) -> Dict[str, Any]:
             break
 
     grade_resp = safe_post(f"{ENV_URL}/grade")
-    raw_score = grade_resp.json().get("score", EPS) if grade_resp else EPS
-    score = _safe_score(raw_score)
+    raw_grade = grade_resp.json().get("score", EPS) if grade_resp else EPS
+    grade = _safe_grade(raw_grade)
 
-    print(f"[GRADE] task={task_id} score={score}", flush=True)
-    return {"task_id": task_id, "score": score}
+    print(f"[GRADE] task={task_id} grade={grade}", flush=True)
+    return {
+        "task_id": task_id,
+        "steps": step_count,
+        "cumulative_reward": _safe_grade(obs.get("cumulative_reward", 0)),
+        "grade": grade,
+        "done": obs.get("done", False),
+    }
 
 
 def run_task_llm(client: OpenAI, model_name: str, task_id: str) -> Dict[str, Any]:
@@ -226,7 +246,7 @@ def run_task_llm(client: OpenAI, model_name: str, task_id: str) -> Dict[str, Any
 
     resp = safe_post(f"{ENV_URL}/reset", json={"task_id": task_id})
     if resp is None:
-        return {"task_id": task_id, "score": _safe_score(0)}
+        return {"task_id": task_id, "steps": 0, "cumulative_reward": 0, "grade": _safe_grade(0), "done": False}
 
     obs = resp.json()
     max_steps = obs.get("max_steps", 15)
@@ -276,14 +296,54 @@ def run_task_llm(client: OpenAI, model_name: str, task_id: str) -> Dict[str, Any
         )}]})
 
     grade_resp = safe_post(f"{ENV_URL}/grade")
-    raw_score = grade_resp.json().get("score", EPS) if grade_resp else EPS
-    score = _safe_score(raw_score)
+    raw_grade = grade_resp.json().get("score", EPS) if grade_resp else EPS
+    grade = _safe_grade(raw_grade)
 
-    print(f"[GRADE] task={task_id} score={score}", flush=True)
-    return {"task_id": task_id, "score": score}
+    print(f"[GRADE] task={task_id} grade={grade}", flush=True)
+    return {
+        "task_id": task_id,
+        "steps": step_count,
+        "cumulative_reward": _safe_grade(obs.get("cumulative_reward", 0)),
+        "grade": grade,
+        "done": obs.get("done", False),
+    }
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
+
+def _write_results(tasks: list, mode: str, model_name: str) -> None:
+    """Write results.json matching the exact schema that baseline.py produces.
+    Each task dict uses 'grade' (not 'score') to match validator expectations.
+    All grade values are clamped to strictly (0, 1) before writing.
+    """
+    # Re-clamp every grade just before writing — belt-and-suspenders
+    safe_tasks = []
+    for t in tasks:
+        safe_tasks.append({
+            "task_id": t["task_id"],
+            "steps": t.get("steps", 0),
+            "cumulative_reward": t.get("cumulative_reward", 0),
+            "grade": _safe_grade(t.get("grade", EPS)),
+            "done": t.get("done", False),
+        })
+
+    avg_grade = sum(t["grade"] for t in safe_tasks) / len(safe_tasks) if safe_tasks else EPS
+    payload = {
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "mode": mode,
+        "model": model_name if mode != "expert" else "N/A",
+        "environment": ENV_URL,
+        "tasks": safe_tasks,
+        "average_grade": avg_grade,
+        "test_status": "PASSED" if avg_grade > 0.3 else "FAILED",
+    }
+    results_file = "results.json"
+    with open(results_file, "w") as f:
+        json.dump(payload, f, indent=2)
+    print(f"\nResults saved to {results_file}")
+    # Print the file so it appears in Docker logs for debugging
+    print(f"results.json contents:\n{json.dumps(payload, indent=2)}")
+
 
 def main() -> None:
     expert_mode = "--expert" in sys.argv
@@ -302,7 +362,8 @@ def main() -> None:
             # Write a safe fallback results.json before exiting so the validator
             # never reads a stale committed file with out-of-range scores.
             _write_results(
-                [{"task_id": tid, "score": _safe_score(0)} for tid in TASK_IDS],
+                [{"task_id": tid, "steps": 0, "cumulative_reward": 0, "grade": _safe_grade(0), "done": False}
+                 for tid in TASK_IDS],
                 mode="llm",
                 model_name=model_name,
             )
@@ -330,39 +391,15 @@ def main() -> None:
     print("SUMMARY")
     print(f"{'='*60}")
     mode_label = "expert" if expert_mode else model_name
-    print(f"{'Task':<30} {'Score':>8}")
-    print("-" * 40)
+    print(f"{'Task':<30} {'Grade':>8} {'Steps':>8} {'Reward':>10}")
+    print("-" * 60)
     for r in results:
-        print(f"{r['task_id']:<30} {r['score']:>8.4f}")
-    avg_score = sum(r["score"] for r in results) / len(results)
-    print("-" * 40)
-    print(f"{'Average (' + mode_label + ')':<30} {avg_score:>8.4f}")
+        print(f"{r['task_id']:<30} {r['grade']:>8.4f} {r['steps']:>8} {r['cumulative_reward']:>10}")
+    avg_grade = sum(r["grade"] for r in results) / len(results)
+    print("-" * 60)
+    print(f"{'Average (' + mode_label + ')':<30} {avg_grade:>8.4f}")
 
     _write_results(results, mode="expert" if expert_mode else "llm", model_name=model_name)
-
-
-def _write_results(
-    tasks: list,
-    mode: str,
-    model_name: str,
-) -> None:
-    """Write results.json. Each task dict contains ONLY task_id and score
-    (a float strictly between 0 and 1) so the validator cannot trip over
-    any other numeric field such as cumulative_reward or step counts."""
-    avg_score = sum(t["score"] for t in tasks) / len(tasks) if tasks else EPS
-    payload = {
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "mode": mode,
-        "model": model_name if mode != "expert" else "N/A",
-        "environment": ENV_URL,
-        "tasks": tasks,          # each task: {"task_id": str, "score": float}
-        "average_score": avg_score,
-        "test_status": "PASSED" if avg_score > 0.3 else "FAILED",
-    }
-    results_file = "results.json"
-    with open(results_file, "w") as f:
-        json.dump(payload, f, indent=2)
-    print(f"\nResults saved to {results_file}")
 
 
 if __name__ == "__main__":
