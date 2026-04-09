@@ -7,6 +7,15 @@ from src.models import State
 EPS = 1e-4  # ensures score is never exactly 0 or 1 after round(..., 4)
 
 
+def _safe_score(value: float) -> float:
+    """Clamp a raw score to the strictly open interval (0, 1) and round to 4dp.
+
+    Guarantees: 0 < result < 1, i.e. result in {0.0001, 0.0002, ..., 0.9999}.
+    This survives any serialisation / JSON round-trip that uses 4 decimal places.
+    """
+    return round(min(1.0 - EPS, max(EPS, float(value))), 4)
+
+
 def grade_task(state: State) -> float:
     """Grade the agent's performance on a completed episode.
 
@@ -51,10 +60,11 @@ def grade_task(state: State) -> float:
         efficiency = max(0.0, 1.0 - steps_ratio)
         score += 0.15 * efficiency
 
-    # Clamp to (0, 1) strictly
-    score = min(1.0 - EPS, max(EPS, score))
-
-    return round(score, 4)
+    # Clamp final score to strictly open interval (0, 1).
+    # _safe_score applies min/max with EPS=1e-4 then rounds to 4dp,
+    # so 0.0 → 0.0001 and 1.0 → 0.9999 — both pass the validator's
+    # strict inequality check (0 < score < 1).
+    return _safe_score(score)
 
 
 def _expected_investigation_count(difficulty: str) -> int:

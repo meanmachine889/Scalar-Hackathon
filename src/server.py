@@ -79,6 +79,11 @@ def state():
 def grade():
     current_state = env.state()
     score = grade_task(current_state)
+    # Defensive guard: ensure the score that leaves this endpoint is strictly
+    # within (0, 1) even if a future change to grade_task forgets to clamp.
+    # 0.0 or 1.0 would fail the validator strict inequality check.
+    _EPS = 1e-4
+    score = round(min(1.0 - _EPS, max(_EPS, float(score))), 4)
     return GradeResponse(score=score, state=current_state)
 
 
