@@ -316,18 +316,17 @@ def _write_results(tasks: list, mode: str, model_name: str) -> None:
     Each task dict uses 'grade' (not 'score') to match validator expectations.
     All grade values are clamped to strictly (0, 1) before writing.
     """
-    # Re-clamp every grade just before writing — belt-and-suspenders
+    # Re-clamp every grade just before writing — belt-and-suspenders.
+    # Only write task_id + grade per task: every extra float field is a
+    # validator liability (e.g. cumulative_reward starts at 0.0).
     safe_tasks = []
     for t in tasks:
         safe_tasks.append({
             "task_id": t["task_id"],
-            "steps": t.get("steps", 0),
-            "cumulative_reward": t.get("cumulative_reward", 0),
             "grade": _safe_grade(t.get("grade", EPS)),
-            "done": t.get("done", False),
         })
 
-    avg_grade = sum(t["grade"] for t in safe_tasks) / len(safe_tasks) if safe_tasks else EPS
+    avg_grade = _safe_grade(sum(t["grade"] for t in safe_tasks) / len(safe_tasks) if safe_tasks else EPS)
     payload = {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "mode": mode,
