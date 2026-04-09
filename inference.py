@@ -89,9 +89,8 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
 # ── Safe score ────────────────────────────────────────────────────────────────
 
 def _safe_score(value: float) -> float:
-    """Clamp to strictly open (0, 1) and round to 4dp."""
-    return round(min(1.0 - EPS, max(EPS, float(value))), 4)
-
+    clamped = min(1.0 - EPS, max(EPS, float(value)))
+    return float(f"{clamped:.4f}")
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 
@@ -340,21 +339,20 @@ def main() -> None:
     client: Optional[OpenAI] = None
     model_name = "expert-policy"
 
+    api_base = None
+    api_key = None
+
     if not expert_mode:
         api_base = os.environ.get("API_BASE_URL")
         api_key = os.environ.get("API_KEY") or os.environ.get("HF_TOKEN") or os.environ.get("OPENAI_API_KEY")
         model_name = os.environ.get("MODEL_NAME", "default-hackathon-model")
 
-        if not api_base or not api_key:
-            print("ERROR: API_BASE_URL and API_KEY must be set.", flush=True)
-            _write_results(
-                [{"task_id": tid, "score": _safe_score(0)} for tid in TASK_IDS],
-                mode="llm", model_name=model_name,
-            )
-            sys.exit(1)
-
+    if not api_base or not api_key:
+        print("ERROR: API_BASE_URL and API_KEY must be set.", flush=True)
+        sys.exit(1)
+    else:
         client = OpenAI(base_url=api_base, api_key=api_key)
-
+        
     if not wait_for_env(ENV_URL):
         print("WARNING: Environment not reachable. Will attempt tasks anyway.", flush=True)
 
