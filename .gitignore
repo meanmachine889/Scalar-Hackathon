@@ -39,6 +39,14 @@ results.json
 *.log
 .coverage
 htmlcov/
+Debug Handoff.md
+DEPLOYMENT_CHECKLIST.md
+FIX_SUMMARY.md
+Knowledge-Transfer.md
+dashboard.txt
+test_selenium.py
+scrape.py
+geckodriver.exe
 
 # Environment variables
 .env.local
