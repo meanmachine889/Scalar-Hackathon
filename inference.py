@@ -194,7 +194,7 @@ def run_task_expert(task_id: str) -> Dict[str, Any]:
 
     resp = safe_post(f"{ENV_URL}/reset", json={"task_id": task_id})
     if resp is None:
-        return {"task_id": task_id, "steps": 0, "cumulative_reward": 0, "grade": 0.0, "done": False}
+        return {"task_id": task_id, "steps": 0, "cumulative_reward": 0, "grade": 1e-4, "done": False}
     
     obs = resp.json()
     policy = EXPERT_POLICIES.get(task_id, [])
@@ -215,8 +215,8 @@ def run_task_expert(task_id: str) -> Dict[str, Any]:
             break
 
     grade_resp = safe_post(f"{ENV_URL}/grade")
-    grade_score = grade_resp.json().get("score", 1e-6) if grade_resp else 1e-6
-    grade_score = min(1.0 - 1e-6, max(1e-6, grade_score))
+    grade_score = grade_resp.json().get("score", 1e-4) if grade_resp else 1e-4
+    grade_score = min(1.0 - 1e-4, max(1e-4, grade_score))
 
     return {
         "task_id": task_id,
@@ -233,7 +233,7 @@ def run_task_llm(client: OpenAI, model_name: str, task_id: str) -> Dict[str, Any
 
     resp = safe_post(f"{ENV_URL}/reset", json={"task_id": task_id})
     if resp is None:
-        return {"task_id": task_id, "steps": 0, "cumulative_reward": 0, "grade": 0.0, "done": False}
+        return {"task_id": task_id, "steps": 0, "cumulative_reward": 0, "grade": 1e-4, "done": False}
     
     obs = resp.json()
     max_steps = obs.get("max_steps", 15)
@@ -286,8 +286,8 @@ def run_task_llm(client: OpenAI, model_name: str, task_id: str) -> Dict[str, Any
         )}]})
 
     grade_resp = safe_post(f"{ENV_URL}/grade")
-    grade_score = grade_resp.json().get("score", 1e-6) if grade_resp else 1e-6
-    grade_score = min(1.0 - 1e-6, max(1e-6, grade_score))
+    grade_score = grade_resp.json().get("score", 1e-4) if grade_resp else 1e-4
+    grade_score = min(1.0 - 1e-4, max(1e-4, grade_score))
 
     return {
         "task_id": task_id,
