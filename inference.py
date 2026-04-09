@@ -29,34 +29,32 @@ from openai import OpenAI
 
 # ── Network helpers ──────────────────────────────────────────────────────────
 
-REQUEST_TIMEOUT = 30  # seconds per HTTP call
+REQUEST_TIMEOUT = 30
 
 
 def wait_for_env(env_url: str, retries: int = 10, delay: float = 3.0) -> bool:
-    """Block until the environment server is reachable, or give up."""
     for attempt in range(1, retries + 1):
         try:
             r = requests.get(f"{env_url}/health", timeout=10)
             if r.status_code == 200:
-                print(f"Environment reachable (attempt {attempt}).")
+                print(f"Environment reachable (attempt {attempt}).", flush=True)
                 return True
         except requests.RequestException:
             pass
-        print(f"Waiting for environment ({attempt}/{retries})...")
+        print(f"Waiting for environment ({attempt}/{retries})...", flush=True)
         time.sleep(delay)
-    print("ERROR: Environment not reachable after retries.")
+    print("ERROR: Environment not reachable after retries.", flush=True)
     return False
 
 
 def safe_post(url: str, **kwargs) -> Optional[requests.Response]:
-    """POST with timeout and exception handling. Returns None on failure."""
     kwargs.setdefault("timeout", REQUEST_TIMEOUT)
     try:
         resp = requests.post(url, **kwargs)
         resp.raise_for_status()
         return resp
     except requests.RequestException as exc:
-        print(f"  HTTP error for {url}: {exc}")
+        print(f"  HTTP error for {url}: {exc}", flush=True)
         return None
 
 
@@ -64,13 +62,36 @@ def safe_post(url: str, **kwargs) -> Optional[requests.Response]:
 
 ENV_URL = os.getenv("ENV_URL", "http://localhost:7860")
 TASK_IDS = ["easy_db_pool", "medium_cache_cascade", "hard_payment_corruption"]
+BENCHMARK = "incident-response-env"
 TEMPERATURE = 0.1
 MAX_TOKENS = 600
 FALLBACK_ACTION = {"action_type": "check_alerts"}
 ACTION_JSON_RE = re.compile(r"\{[^{}]*\}", re.DOTALL)
 
-# EPS must survive round(..., 4): 1e-4 rounds to 0.0001, 1.0-1e-4 rounds to 0.9999
 EPS = 1e-4
+
+
+# ── Stdout log helpers (mandatory format) ────────────────────────────────────
+
+def log_start(task: str, model: str) -> None:
+    print(f"[START] task={task} env={BENCHMARK} model={model}", flush=True)
+
+
+def log_step(step: int, action: str, reward: float, done: bool) -> None:
+    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={str(done).lower()} error=null", flush=True)
+
+
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(f"[END] success={str(success).lower()} steps={steps} score={score:.4f} rewards={rewards_str}", flush=True)
+
+
+# ── Safe score ────────────────────────────────────────────────────────────────
+
+def _safe_score(value: float) -> float:
+    """Clamp to strictly open (0, 1) and round to 4dp."""
+    return round(min(1.0 - EPS, max(EPS, float(value))), 4)
+
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 
@@ -93,7 +114,7 @@ SYSTEM_PROMPT = textwrap.dedent("""\
     Reply with exactly ONE JSON action object. Nothing else.
     """)
 
-# ── Expert (hardcoded) policies per task ──────────────────────────────────────
+# ── Expert policies ───────────────────────────────────────────────────────────
 
 EXPERT_POLICIES: Dict[str, List[Dict[str, Any]]] = {
     "easy_db_pool": [
@@ -144,17 +165,9 @@ EXPERT_POLICIES: Dict[str, List[Dict[str, Any]]] = {
 }
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _safe_grade(value: float) -> float:
-    """Clamp to strictly open (0, 1) and round to 4dp.
-    1e-4 -> 0.0001 (valid), 1.0-1e-4 -> 0.9999 (valid).
-    """
-    return round(min(1.0 - EPS, max(EPS, float(value))), 4)
-
+# ── Observation helper ────────────────────────────────────────────────────────
 
 def build_observation_text(obs: Dict[str, Any]) -> str:
-    """Convert an environment observation dict into a text summary for the LLM."""
     parts = [obs.get("message", "")]
     if obs.get("alerts"):
         parts.append("\nAlerts:")
@@ -174,7 +187,6 @@ def build_observation_text(obs: Dict[str, Any]) -> str:
 
 
 def parse_model_action(response_text: str) -> Dict[str, Any]:
-    """Extract a JSON action dict from the LLM response."""
     if not response_text:
         return FALLBACK_ACTION
     text = response_text.strip()
@@ -202,17 +214,19 @@ def parse_model_action(response_text: str) -> Dict[str, Any]:
 
 # ── Task runners ──────────────────────────────────────────────────────────────
 
-def run_task_expert(task_id: str) -> Dict[str, Any]:
-    """Run a task using the hardcoded expert policy (no LLM)."""
-    print(f"\n[START] task={task_id} mode=expert", flush=True)
+def run_task_expert(task_id: str, model_name: str) -> Dict[str, Any]:
+    log_start(task=task_id, model=model_name)
 
     resp = safe_post(f"{ENV_URL}/reset", json={"task_id": task_id})
     if resp is None:
-        return {"task_id": task_id, "steps": 0, "cumulative_reward": _safe_grade(0), "grade": _safe_grade(0), "done": False}
+        score = _safe_score(0)
+        log_end(success=False, steps=0, score=score, rewards=[])
+        return {"task_id": task_id, "score": score}
 
-    obs = resp.json()
     policy = EXPERT_POLICIES.get(task_id, [])
     step_count = 0
+    rewards: List[float] = []
+    obs = resp.json()
 
     for action in policy:
         step_count += 1
@@ -221,44 +235,41 @@ def run_task_expert(task_id: str) -> Dict[str, Any]:
         if resp is None:
             break
         obs = resp.json()
-        reward = obs.get("reward", 0)
-        print(f"[STEP] step={step_count} action={action_type} reward={round(reward, 4)} done={obs.get('done', False)}", flush=True)
-        if obs.get("done", False):
+        reward = obs.get("reward", 0.0)
+        done = obs.get("done", False)
+        rewards.append(reward)
+        log_step(step=step_count, action=action_type, reward=reward, done=done)
+        if done:
             break
 
     grade_resp = safe_post(f"{ENV_URL}/grade")
-    raw_grade = grade_resp.json().get("score", EPS) if grade_resp else EPS
-    grade = _safe_grade(raw_grade)
+    raw_score = grade_resp.json().get("score", EPS) if grade_resp else EPS
+    score = _safe_score(raw_score)
 
-    print(f"[GRADE] task={task_id} grade={grade}", flush=True)
-    return {
-        "task_id": task_id,
-        "steps": step_count,
-        "cumulative_reward": _safe_grade(obs.get("cumulative_reward", 0)),
-        "grade": grade,
-        "done": obs.get("done", False),
-    }
+    log_end(success=obs.get("done", False), steps=step_count, score=score, rewards=rewards)
+    return {"task_id": task_id, "score": score}
 
 
 def run_task_llm(client: OpenAI, model_name: str, task_id: str) -> Dict[str, Any]:
-    """Run a task using an LLM agent via the OpenAI client."""
-    print(f"\n[START] task={task_id} mode=llm model={model_name}", flush=True)
+    log_start(task=task_id, model=model_name)
 
     resp = safe_post(f"{ENV_URL}/reset", json={"task_id": task_id})
     if resp is None:
-        return {"task_id": task_id, "steps": 0, "cumulative_reward": _safe_grade(0), "grade": _safe_grade(0), "done": False}
+        score = _safe_score(0)
+        log_end(success=False, steps=0, score=score, rewards=[])
+        return {"task_id": task_id, "score": score}
 
     obs = resp.json()
     max_steps = obs.get("max_steps", 15)
     obs_text = build_observation_text(obs)
+    step_count = 0
+    rewards: List[float] = []
+    history: List[str] = []
 
     messages = [
         {"role": "system", "content": [{"type": "text", "text": SYSTEM_PROMPT}]},
         {"role": "user", "content": [{"type": "text", "text": f"INCIDENT ALERT:\n{obs_text}"}]},
     ]
-
-    step_count = 0
-    history: List[str] = []
 
     while not obs.get("done", False) and step_count < max_steps:
         raw_response = None
@@ -272,7 +283,7 @@ def run_task_llm(client: OpenAI, model_name: str, task_id: str) -> Dict[str, Any
             )
             raw_response = completion.choices[0].message.content or ""
         except Exception as exc:
-            print(f"  Model request failed ({exc}). Using fallback action.")
+            print(f"  Model request failed ({exc}). Using fallback action.", flush=True)
             raw_response = json.dumps(FALLBACK_ACTION)
 
         action = parse_model_action(raw_response)
@@ -283,8 +294,11 @@ def run_task_llm(client: OpenAI, model_name: str, task_id: str) -> Dict[str, Any
         if resp is None:
             break
         obs = resp.json()
-        reward = obs.get("reward", 0)
-        print(f"[STEP] step={step_count} action={action_type} reward={round(reward, 4)} done={obs.get('done', False)}", flush=True)
+        reward = obs.get("reward", 0.0)
+        done = obs.get("done", False)
+        rewards.append(reward)
+
+        log_step(step=step_count, action=action_type, reward=reward, done=done)
 
         obs_text = build_observation_text(obs)
         history.append(f"Step {step_count}: {action_type} -> reward {reward:+.3f}")
@@ -296,97 +310,62 @@ def run_task_llm(client: OpenAI, model_name: str, task_id: str) -> Dict[str, Any
         )}]})
 
     grade_resp = safe_post(f"{ENV_URL}/grade")
-    raw_grade = grade_resp.json().get("score", EPS) if grade_resp else EPS
-    grade = _safe_grade(raw_grade)
+    raw_score = grade_resp.json().get("score", EPS) if grade_resp else EPS
+    score = _safe_score(raw_score)
 
-    print(f"[GRADE] task={task_id} grade={grade}", flush=True)
-    return {
-        "task_id": task_id,
-        "steps": step_count,
-        "cumulative_reward": _safe_grade(obs.get("cumulative_reward", 0)),
-        "grade": grade,
-        "done": obs.get("done", False),
-    }
+    log_end(success=obs.get("done", False), steps=step_count, score=score, rewards=rewards)
+    return {"task_id": task_id, "score": score}
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ── Results file ──────────────────────────────────────────────────────────────
 
 def _write_results(tasks: list, mode: str, model_name: str) -> None:
-    """Write results.json for the validator.
-    Each task dict has ONLY task_id + score.
-    ALL float values clamped strictly to (0, 1) — no raw floats anywhere.
-    """
-    safe_tasks = []
-    for t in tasks:
-        safe_tasks.append({
-            "task_id": t["task_id"],
-            "score": _safe_grade(t.get("grade", t.get("score", EPS))),
-        })
-
-    avg = _safe_grade(sum(t["score"] for t in safe_tasks) / len(safe_tasks) if safe_tasks else EPS)
+    safe_tasks = [{"task_id": t["task_id"], "score": _safe_score(t.get("score", EPS))} for t in tasks]
+    avg = _safe_score(sum(t["score"] for t in safe_tasks) / len(safe_tasks) if safe_tasks else EPS)
     payload = {
         "tasks": safe_tasks,
         "average_score": avg,
         "mode": mode,
         "model": model_name if mode != "expert" else "N/A",
     }
-    results_file = "results.json"
-    with open(results_file, "w") as f:
+    with open("results.json", "w") as f:
         json.dump(payload, f, indent=2)
-    print(f"\nResults saved to {results_file}")
-    print(f"results.json contents:\n{json.dumps(payload, indent=2)}")
+    print(f"\nresults.json contents:\n{json.dumps(payload, indent=2)}", flush=True)
 
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     expert_mode = "--expert" in sys.argv
     client: Optional[OpenAI] = None
-    model_name = ""
+    model_name = "expert-policy"
 
-    if expert_mode:
-        print("Inference Script — EXPERT MODE (no LLM, reproducible baseline)")
-    else:
+    if not expert_mode:
         api_base = os.environ.get("API_BASE_URL")
         api_key = os.environ.get("API_KEY") or os.environ.get("HF_TOKEN") or os.environ.get("OPENAI_API_KEY")
         model_name = os.environ.get("MODEL_NAME", "default-hackathon-model")
 
         if not api_base or not api_key:
-            print("ERROR: API_BASE_URL and an API_KEY (or HF_TOKEN) must be set.")
+            print("ERROR: API_BASE_URL and API_KEY must be set.", flush=True)
             _write_results(
-                [{"task_id": tid, "grade": _safe_grade(0)} for tid in TASK_IDS],
-                mode="llm",
-                model_name=model_name,
+                [{"task_id": tid, "score": _safe_score(0)} for tid in TASK_IDS],
+                mode="llm", model_name=model_name,
             )
             sys.exit(1)
 
         client = OpenAI(base_url=api_base, api_key=api_key)
-        print("Inference Script — Incident Response Environment")
-        print(f"API Base URL: {api_base}")
-        print(f"Model: {model_name}")
 
     if not wait_for_env(ENV_URL):
-        print("WARNING: Environment not reachable. Will attempt tasks anyway.")
+        print("WARNING: Environment not reachable. Will attempt tasks anyway.", flush=True)
 
     results = []
     for task_id in TASK_IDS:
         if expert_mode:
-            result = run_task_expert(task_id)
+            result = run_task_expert(task_id, model_name)
         else:
             result = run_task_llm(client, model_name, task_id)
         results.append(result)
         time.sleep(1)
-
-    # ── Summary ───────────────────────────────────────────────────────
-    print(f"\n{'='*60}")
-    print("SUMMARY")
-    print(f"{'='*60}")
-    mode_label = "expert" if expert_mode else model_name
-    print(f"{'Task':<30} {'Grade':>8} {'Steps':>8} {'Reward':>10}")
-    print("-" * 60)
-    for r in results:
-        print(f"{r['task_id']:<30} {r['grade']:>8.4f} {r['steps']:>8} {r['cumulative_reward']:>10}")
-    avg_grade = sum(r["grade"] for r in results) / len(results)
-    print("-" * 60)
-    print(f"{'Average (' + mode_label + ')':<30} {avg_grade:>8.4f}")
 
     _write_results(results, mode="expert" if expert_mode else "llm", model_name=model_name)
 
