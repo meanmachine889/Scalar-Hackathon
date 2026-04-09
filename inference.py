@@ -215,7 +215,8 @@ def run_task_expert(task_id: str) -> Dict[str, Any]:
             break
 
     grade_resp = safe_post(f"{ENV_URL}/grade")
-    grade_score = grade_resp.json().get("score", 0.0) if grade_resp else 0.0
+    grade_score = grade_resp.json().get("score", 1e-6) if grade_resp else 1e-6
+    grade_score = min(1.0 - 1e-6, max(1e-6, grade_score))
 
     return {
         "task_id": task_id,
@@ -285,7 +286,8 @@ def run_task_llm(client: OpenAI, model_name: str, task_id: str) -> Dict[str, Any
         )}]})
 
     grade_resp = safe_post(f"{ENV_URL}/grade")
-    grade_score = grade_resp.json().get("score", 0.0) if grade_resp else 0.0
+    grade_score = grade_resp.json().get("score", 1e-6) if grade_resp else 1e-6
+    grade_score = min(1.0 - 1e-6, max(1e-6, grade_score))
 
     return {
         "task_id": task_id,
