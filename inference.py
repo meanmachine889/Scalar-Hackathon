@@ -312,35 +312,30 @@ def run_task_llm(client: OpenAI, model_name: str, task_id: str) -> Dict[str, Any
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def _write_results(tasks: list, mode: str, model_name: str) -> None:
-    """Write results.json matching the exact schema that baseline.py produces.
-    Each task dict uses 'grade' (not 'score') to match validator expectations.
-    All grade values are clamped to strictly (0, 1) before writing.
+    """Write results.json for the validator.
+    Each task dict has ONLY task_id + score (no extra float fields).
+    Uses 'score' key to match server.py GradeResponse schema.
+    All values clamped strictly to (0, 1).
     """
-    # Re-clamp every grade just before writing — belt-and-suspenders.
-    # Only write task_id + grade per task: every extra float field is a
-    # validator liability (e.g. cumulative_reward starts at 0.0).
     safe_tasks = []
     for t in tasks:
+        raw = t.get("grade", t.get("score", EPS))
         safe_tasks.append({
             "task_id": t["task_id"],
-            "grade": _safe_grade(t.get("grade", EPS)),
+            "score": _safe_grade(raw),
         })
 
-    avg_grade = _safe_grade(sum(t["grade"] for t in safe_tasks) / len(safe_tasks) if safe_tasks else EPS)
+    avg = _safe_grade(sum(t["score"] for t in safe_tasks) / len(safe_tasks) if safe_tasks else EPS)
     payload = {
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "tasks": safe_tasks,
+        "average_score": avg,
         "mode": mode,
         "model": model_name if mode != "expert" else "N/A",
-        "environment": ENV_URL,
-        "tasks": safe_tasks,
-        "average_grade": avg_grade,
-        "test_status": "PASSED" if avg_grade > 0.3 else "FAILED",
     }
     results_file = "results.json"
     with open(results_file, "w") as f:
         json.dump(payload, f, indent=2)
     print(f"\nResults saved to {results_file}")
-    # Print the file so it appears in Docker logs for debugging
     print(f"results.json contents:\n{json.dumps(payload, indent=2)}")
 
 
