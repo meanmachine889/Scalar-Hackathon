@@ -135,11 +135,7 @@ def run_task_expert(task_id: str) -> dict:
     grade_resp.raise_for_status()
     grade = grade_resp.json()
 
-    print(f"\n  Done: {obs.get('done', False)}")
-    print(f"  Steps used: {step_count}")
-    print(f"  Cumulative reward: {obs.get('cumulative_reward', 0):.3f}")
-    print(f"  GRADE: {grade['score']:.4f}")
-
+    
     return {
         "task_id": task_id,
         "steps": step_count,
