@@ -147,10 +147,7 @@ def run_task_expert(task_id: str) -> dict:
 
 def run_task_llm(client, task_id: str) -> dict:
     """Run a single task using an LLM agent."""
-    print(f"\n{'='*60}")
-    print(f"TASK: {task_id}")
-    print(f"{'='*60}")
-
+    
     resp = requests.post(f"{ENV_URL}/reset", json={"task_id": task_id})
     resp.raise_for_status()
     obs = resp.json()
