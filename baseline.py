@@ -265,7 +265,6 @@ def main():
 
     # Summary
     mode_label = "EXPERT" if expert_mode else MODEL
-    print(f"\n{'='*60}")
 
     avg_grade = sum(r["grade"] for r in results) / len(results)
     print("-" * 60)
