@@ -264,14 +264,8 @@ def main():
         time.sleep(1)
 
     # Summary
+    mode_label = "EXPERT" if expert_mode else MODEL
     print(f"\n{'='*60}")
-    print("SUMMARY")
-    print(f"{'='*60}")
-    mode_label = "expert" if expert_mode else MODEL
-    print(f"{'Task':<30} {'Grade':>8} {'Steps':>8} {'Reward':>10}")
-    print("-" * 60)
-    for r in results:
-        print(f"{r['task_id']:<30} {r['grade']:>8.4f} {r['steps']:>8} {r['cumulative_reward']:>10.3f}")
 
     avg_grade = sum(r["grade"] for r in results) / len(results)
     print("-" * 60)
