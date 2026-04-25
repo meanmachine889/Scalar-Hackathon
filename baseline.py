@@ -212,9 +212,7 @@ def run_task_llm(client, task_id: str) -> dict:
         if obs.get("command_output"):
             obs_summary += f"\n\nCommand output: {obs['command_output']}"
 
-        messages.append({"role": "assistant", "content": raw_response})
-        messages.append({"role": "user", "content": f"Observation (step {step_count}, reward: {obs.get('reward', 0):.3f}, cumulative: {obs.get('cumulative_reward', 0):.3f}):\n{obs_summary}"})
-
+        
     grade_resp = requests.post(f"{ENV_URL}/grade")
     grade_resp.raise_for_status()
     grade = grade_resp.json()
