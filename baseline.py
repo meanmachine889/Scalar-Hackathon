@@ -260,18 +260,7 @@ def main():
         time.sleep(1)
 
     # Summary
-    print(f"\n{'='*60}")
-    print("SUMMARY")
-    print(f"{'='*60}")
-    mode_label = "expert" if expert_mode else MODEL
-    print(f"{'Task':<30} {'Grade':>8} {'Steps':>8} {'Reward':>10}")
-    print("-" * 60)
-    for r in results:
-        print(f"{r['task_id']:<30} {r['grade']:>8.4f} {r['steps']:>8} {r['cumulative_reward']:>10.3f}")
-
-    avg_grade = sum(r["grade"] for r in results) / len(results)
-    print("-" * 60)
-    print(f"{'Average (' + mode_label + ')':<30} {avg_grade:>8.4f}")
+    
 
     # Save results to file for reproducibility and CI/CD integration
     results_file = "results.json"
